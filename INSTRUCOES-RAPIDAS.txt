@@ -1,0 +1,64 @@
+🚀 GUIA RÁPIDO - DEPLOY NO GITHUB PAGES
+==========================================
+
+✅ CONFIGURAÇÃO ATUALIZADA - CAMINHOS RELATIVOS
+Esta pasta está configurada para funcionar com QUALQUER nome de repositório!
+Agora você pode simplesmente arrastar os arquivos para o GitHub.
+
+📁 ARQUIVOS PRONTOS PARA DEPLOY:
+- index.html (página principal)
+- assets/ (CSS, JS, imagens)
+- manifest.json (PWA)
+- icons/ (ícones da aplicação)
+- favicon.ico
+
+🔧 CONFIGURAÇÃO APLICADA:
+- Base path: "./" (caminhos relativos)
+- Todos os assets usam caminhos relativos
+- Funciona independente do nome do repositório
+
+📋 PASSOS PARA HOSPEDAR:
+
+1️⃣ CRIAR REPOSITÓRIO NO GITHUB
+   - Vá para github.com
+   - Clique em "New repository"
+   - Escolha QUALQUER nome (ex: meu-saas, cobranca-app, etc.)
+   - Marque como "Public"
+   - NÃO adicione README, .gitignore ou license
+
+2️⃣ FAZER UPLOAD DOS ARQUIVOS
+   - Arraste TODOS os arquivos desta pasta para o repositório
+   - Ou use "uploading an existing file"
+   - Faça commit com mensagem: "Deploy inicial"
+
+3️⃣ CONFIGURAR GITHUB PAGES
+   - Vá em Settings do repositório
+   - Role até "Pages" no menu lateral
+   - Em "Source", selecione "Deploy from a branch"
+   - Branch: "main" (ou "master")
+   - Folder: "/ (root)"
+   - Clique "Save"
+
+4️⃣ ACESSAR SEU SAAS
+   Após alguns minutos, acesse:
+   https://SEU-USUARIO.github.io/NOME-DO-REPOSITORIO
+
+🔄 PARA ATUALIZAÇÕES FUTURAS:
+1. Execute: npm run build (na pasta principal)
+2. Execute: node copy-build.js (nesta pasta)
+3. Faça upload dos arquivos atualizados no GitHub
+
+⚠️ OBSERVAÇÕES IMPORTANTES:
+- Os arquivos já estão otimizados para produção
+- Todos os caminhos são relativos - funciona em qualquer repositório
+- O SAAS funcionará imediatamente após o upload
+- Não precisa configurar nomes específicos de repositório
+
+✅ VANTAGENS DESTA CONFIGURAÇÃO:
+- Funciona com qualquer nome de repositório
+- Simples arrastar e soltar no GitHub
+- Sem necessidade de configurações adicionais
+- Caminhos sempre corretos
+
+🎯 PRONTO PARA USO!
+Agora é só arrastar os arquivos para o GitHub e seu SAAS estará online!
