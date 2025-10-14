@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <title>Agiliza Fluxo - Redirecionando...</title>
+    <script>
+        // GitHub Pages SPA redirect solution
+        // Store the current path and redirect to index.html
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/') {
+            sessionStorage.setItem('github-pages-redirect', currentPath);
+        }
+        window.location.replace('/');
+    </script>
+</head>
+<body>
+    <div style="text-align: center; margin-top: 50px; font-family: Arial, sans-serif;">
+        <h1>Redirecionando...</h1>
+        <p>Você será redirecionado automaticamente.</p>
+    </div>
+</body>
+</html>
