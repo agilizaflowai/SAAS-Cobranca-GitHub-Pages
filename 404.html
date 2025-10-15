@@ -1,22 +1,17 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="utf-8">
-    <title>Agiliza Fluxo - Redirecionando...</title>
-    <script>
-        // GitHub Pages SPA redirect solution
-        // Store the current path and redirect to index.html
-        const currentPath = window.location.pathname;
-        if (currentPath !== '/') {
-            sessionStorage.setItem('github-pages-redirect', currentPath);
-        }
-        window.location.replace('/');
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgilizaCobrança - Redirecionando...</title>
+  <script>
+    // Armazena o caminho original no sessionStorage e redireciona para index.html
+    // Isso permite que o roteamento SPA funcione corretamente no GitHub Pages
+    sessionStorage.setItem('redirectPath', location.pathname + location.search + location.hash);
+    location.replace(location.origin + '/');
+  </script>
 </head>
 <body>
-    <div style="text-align: center; margin-top: 50px; font-family: Arial, sans-serif;">
-        <h1>Redirecionando...</h1>
-        <p>Você será redirecionado automaticamente.</p>
-    </div>
+  <p>Redirecionando...</p>
 </body>
 </html>
