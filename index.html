@@ -38,5 +38,50 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      (function() {
+        function swapText(node) {
+          const targets = ["Mensagem do WhatsApp", "Mensagem do Whatsapp"];
+          const replacement = "Código Template";
+          const walk = (n) => {
+            if (!n) return;
+            if (n.nodeType === 3) {
+              const txt = n.nodeValue;
+              targets.forEach((t) => {
+                if (txt && txt.includes(t)) {
+                  n.nodeValue = txt.replace(t, replacement);
+                }
+              });
+            } else if (n.nodeType === 1) {
+              const el = n;
+              targets.forEach((t) => {
+                if (el.getAttribute) {
+                  const al = el.getAttribute("aria-label");
+                  if (al && al.includes(t)) el.setAttribute("aria-label", al.replace(t, replacement));
+                  const ph = el.getAttribute("placeholder");
+                  if (ph && ph.includes(t)) el.setAttribute("placeholder", ph.replace(t, replacement));
+                  const title = el.getAttribute("title");
+                  if (title && title.includes(t)) el.setAttribute("title", title.replace(t, replacement));
+                }
+              });
+              if (el.childNodes && el.childNodes.length) {
+                el.childNodes.forEach(walk);
+              }
+            }
+          };
+          walk(node || document.body);
+        }
+        // Run once and observe changes (SPA)
+        swapText(document.body);
+        const obs = new MutationObserver((mutations) => {
+          for (const m of mutations) {
+            if (m.addedNodes) m.addedNodes.forEach((n) => swapText(n));
+            if (m.target) swapText(m.target);
+          }
+        });
+        obs.observe(document.body, { subtree: true, childList: true, characterData: true });
+        window.__renameWhatsappLabel = swapText; // debug helper
+      })();
+    </script>
   </body>
 </html>

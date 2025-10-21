@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "dev": "npx --yes http-server -p 5173 -c-1 .",
     "build": "cd .. && npm run build && npm run copy-files",
     "copy-files": "node copy-build.js",
     "deploy": "npm run build && git add . && git commit -m \"Deploy to GitHub Pages\" && git push origin main"
