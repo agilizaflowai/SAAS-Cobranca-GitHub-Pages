@@ -35,6 +35,9 @@
     <link rel="stylesheet" crossorigin href="./assets/index-DYc91Wk4.css">
     <!-- Chart.js for rendering reports chart -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pt.js"></script>
     <!-- jsPDF for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   </head>
@@ -371,6 +374,8 @@
             }
             /* Oculta o card inteiro quando marcado para remoção completa */
             .__removeInadCard { display: none !important; visibility: hidden !important; }
+            /* Ocultação genérica para blocos legados */
+            .__hideLegacy { display: none !important; visibility: hidden !important; }
             /* Pré-ocultação: esconde o wrapper de grid do gráfico assim que qualquer traço aparece */
             .lg\\:col-span-2:has(.recharts-responsive-container),
             .lg\\:col-span-2:has(svg.recharts-surface),
@@ -517,6 +522,8 @@
           // Mover “Atividade Recente” para baixo de “Total em Cobrança”
           if (moveRecentActivityBelowTotal()) changed = true;
           if (moveRecentActivityBelowTotalStrict()) changed = true;
+          if (removeBenchmarkAgentPanel()) changed = true;
+          if (clearDashboardSection()) changed = true;
           return changed;
         }
 
@@ -527,6 +534,8 @@
           const mo = new MutationObserver(() => {
             // Sem throttle para reagir instantaneamente a novos nós
             cleanupOnce();
+            removeBenchmarkAgentPanel();
+            clearDashboardSection();
           });
           mo.observe(document.body, { subtree: true, childList: true, attributes: false });
           // Desconecta após curto período para evitar custo contínuo
@@ -641,6 +650,44 @@
 
           recentCard.classList.add('__recentMovedStrict');
           return true;
+        }
+
+        function removeBenchmarkAgentPanel() {
+          let removed = false;
+          const byId = document.getElementById('benchmark-agent-panel');
+          if (byId) { try { byId.remove(); removed = true; } catch (_) {} }
+          const all = Array.from(document.querySelectorAll('body *'));
+          const hit = all.find(el => /agente\s+benchmarket/i.test((el.textContent || '').trim()));
+          if (hit) {
+            const cont = hit.closest('#benchmark-agent-panel, div, section, aside');
+            if (cont) { try { cont.remove(); removed = true; } catch (_) {} }
+          }
+          return removed;
+        }
+
+        function isDashboardRoute() {
+          const p = (location.pathname || '').toLowerCase();
+          if (p && p !== '/' && p !== '') return false;
+          const reportsHeading = locateByHeading(/relat[óo]rios/i);
+          if (reportsHeading) return false;
+          const total = locateByHeading(/total\s+em\s+cobran[çc]a/i);
+          const recent = locateByHeading(/atividade\s+recente/i);
+          return !!(total || recent);
+        }
+
+        function clearDashboardSection() {
+          if (!isDashboardRoute()) return false;
+          const totalH = locateByHeading(/total\s+em\s+cobran[çc]a/i);
+          const atrasH = locateByHeading(/clientes\s+em\s+atraso/i);
+          const vencerH = locateByHeading(/clientes\s+a\s+vencer/i);
+          const recentH = locateByHeading(/atividade\s+recente/i);
+          const cs = [totalH, atrasH, vencerH, recentH].filter(Boolean).map(findCardContainer).filter(Boolean);
+          let removed = false;
+          cs.forEach(c => { try { c.remove(); removed = true; } catch(_){} });
+          const bench = document.getElementById('benchmark-agent-panel');
+          if (bench) { try { bench.remove(); removed = true; } catch(_){} }
+          // Não remover saudação, cabeçalho ou outros módulos
+          return removed;
         }
 
         // Insere estilos o mais cedo possível para evitar FOUC
@@ -929,10 +976,12 @@
         const CHART_ID = 'reports-mixed-chart';
         const TOP_CHART_ID = 'reports-top-lines-chart';
         const PERCENT_CHART_ID = 'reports-percent-chart';
+        const MIX_TITULOS_CHART_ID = 'reports-mix-titulos-chart';
         // Flags para evitar recriação desnecessária
         window.__reportsTopChartInited = false;
         window.__reportsChartInited = false;
         window.__reportsPercentChartInited = false;
+        window.__reportsMixTitulosChartInited = false;
         let __reportsInitTimer = null;
         const INIT_DELAY_MS = 120; // pequeno delay para evitar flash
         const SHOW_DELAY_MS = 80;  // micro atraso antes de mostrar
@@ -990,6 +1039,43 @@
         // Configuração do Supabase para integração com gráficos
         const SUPABASE_URL = 'https://bcczogknrassgjgoctgx.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjY3pvZ2tucmFzc2dqZ29jdGd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxNDYwNzgsImV4cCI6MjA2ODcyMjA3OH0.DPCs4gh3AG6L8y4nw3eBfm0WRWgESsE_SCgk_D127EA';
+
+        async function checkSupabaseTableExists(table) {
+          try {
+            const url = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(table)}?select=*&limit=1`;
+            const resp = await fetch(url, {
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'count=exact'
+              }
+            });
+            let sample = null;
+            if (resp.ok) {
+              const data = await resp.json();
+              sample = Array.isArray(data) && data.length ? data[0] : null;
+            }
+            window.__supabaseTablesCheck = window.__supabaseTablesCheck || {};
+            window.__supabaseTablesCheck[table] = { exists: !!resp.ok, status: resp.status, sample };
+            return !!resp.ok;
+          } catch (err) {
+            window.__supabaseTablesCheck = window.__supabaseTablesCheck || {};
+            window.__supabaseTablesCheck[table] = { exists: false, error: String(err && err.message || err) };
+            return false;
+          }
+        }
+
+        async function probeTablesOnce() {
+          if (window.__supabaseTablesProbed) return;
+          window.__supabaseTablesProbed = true;
+          try {
+            await Promise.all([
+              checkSupabaseTableExists('grafico_inadimplencia'),
+              checkSupabaseTableExists('titulos_aberto')
+            ]);
+          } catch (_) {}
+        }
 
         // Função para buscar dados reais da tabela grafico_inadimplencia
         async function fetchInadimplenciaData() {
@@ -1126,6 +1212,56 @@
           };
         }
 
+        async function fetchInadValorTotalAgg() {
+          try {
+            const s = `select=ano:date_part('year',captado_dia),mes:date_part('month',captado_dia),valor_mes:sum(valor_total)`;
+            const g = `group=ano,mes`;
+            const o = `order=ano.asc,mes.asc`;
+            const url = `${SUPABASE_URL}/rest/v1/grafico_inadimplencia?${s}&${g}&${o}`;
+            const resp = await fetch(url, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Accept': 'application/json' } });
+            if (!resp.ok) throw new Error(String(resp.status));
+            const rows = await resp.json();
+            const map = new Map();
+            for (const r of rows) {
+              const y = parseInt(r.ano, 10);
+              const m = String(parseInt(r.mes, 10)).padStart(2,'0');
+              if (!y || !m) continue;
+              const mk = `${y}-${m}`;
+              const val = Number(r.valor_mes) || Number(String(r.valor_mes || '0').replace(/\./g,'').replace(/,/g,'.')) || 0;
+              map.set(mk, (map.get(mk) || 0) + val);
+            }
+            const months = Array.from(map.keys()).sort();
+            return { valuesMap: map, months };
+          } catch (_) {
+            try {
+              let all = [];
+              let offset = 0;
+              const limit = 1000;
+              let hasMore = true;
+              while (hasMore) {
+                const url = `${SUPABASE_URL}/rest/v1/grafico_inadimplencia?select=captado_dia,valor_total&order=captado_dia.asc&offset=${offset}&limit=${limit}`;
+                const resp = await fetch(url, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Accept': 'application/json' } });
+                if (!resp.ok) throw new Error(String(resp.status));
+                const rows = await resp.json();
+                all = all.concat(Array.isArray(rows) ? rows : []);
+                hasMore = Array.isArray(rows) && rows.length === limit;
+                offset += limit;
+              }
+              const map = new Map();
+              for (const r of all) {
+                const mk = __monthKeyFromDateStr(r.captado_dia);
+                if (!mk) continue;
+                const val = Number(r.valor_total) || Number(String(r.valor_total || '0').replace(/\./g,'').replace(/,/g,'.')) || 0;
+                map.set(mk, (map.get(mk) || 0) + val);
+              }
+              const months = Array.from(map.keys()).sort();
+              return { valuesMap: map, months };
+            } catch (__) {
+              return { valuesMap: new Map(), months: [] };
+            }
+          }
+        }
+
         // Função para buscar e processar dados para o gráfico de percentual
         async function fetchPercentualData() {
           console.log('=== BUSCANDO DADOS PARA GRÁFICO DE PERCENTUAL ===');
@@ -1172,6 +1308,80 @@
           }
         }
 
+        async function fetchTitulosAbertoCounts() {
+          try {
+            let all = [];
+            let offset = 0;
+            const limit = 1000;
+            let more = true;
+            while (more) {
+              const resp = await fetch(`${SUPABASE_URL}/rest/v1/titulos_aberto?select=captado_dia,mes_referencia,ano_referencia,numero_titulo,valor_titulo&order=captado_dia.asc&offset=${offset}&limit=${limit}`, {
+                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'count=exact', 'Accept': 'application/json' }
+              });
+              if (!resp.ok) break;
+              const data = await resp.json();
+              all = all.concat(data);
+              more = data.length === limit;
+              offset += limit;
+            }
+            const map = new Map();
+            const vmap = new Map();
+            try { console.log('TitulosFallback total rows:', all.length); } catch(_) {}
+            for (const row of all) {
+              const nt = row.numero_titulo;
+              if (nt === null || nt === undefined || String(nt).trim() === '') continue;
+              let mk = __monthKeyFromDateStr(row.captado_dia);
+              if (!mk) {
+                const y = parseInt(row.ano_referencia, 10);
+                let m = row.mes_referencia;
+                if (m === null || m === undefined) continue;
+                m = String(m).padStart(2, '0');
+                if (!y || !m) continue;
+                mk = `${y}-${m}`;
+              }
+              map.set(mk, (map.get(mk) || 0) + 1);
+              const val = Number(row.valor_titulo) || 0;
+              vmap.set(mk, (vmap.get(mk) || 0) + val);
+            }
+            const months = Array.from(new Set([...map.keys(), ...vmap.keys()])).sort();
+            try { console.log('TitulosFallback months:', months); } catch(_) {}
+            return { countsMap: map, valuesMap: vmap, months };
+          } catch (_) {
+            try { console.warn('TitulosFallback failed'); } catch(_) {}
+            return { countsMap: new Map(), valuesMap: new Map(), months: [] };
+          }
+        }
+
+        async function fetchTitulosAbertoCountsAgg() {
+          try {
+            const s = `select=ano:date_part('year',captado_dia),mes:date_part('month',captado_dia),count:count(numero_titulo),valor_mes:sum(valor_titulo)`;
+            const g = `group=ano,mes`;
+            const o = `order=ano.asc,mes.asc`;
+            const url = `${SUPABASE_URL}/rest/v1/titulos_aberto?${s}&${g}&${o}`;
+            const resp = await fetch(url, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Accept': 'application/json' } });
+            if (!resp.ok) throw new Error(String(resp.status));
+            const rows = await resp.json();
+            try { console.log('TitulosAgg rows:', rows); } catch(_) {}
+            const map = new Map();
+            const vmap = new Map();
+            for (const r of rows) {
+              const y = parseInt(r.ano, 10);
+              const m = String(parseInt(r.mes, 10)).padStart(2, '0');
+              if (!y || !m) continue;
+              const mk = `${y}-${m}`;
+              const c = parseInt(r.count, 10);
+              map.set(mk, (map.get(mk) || 0) + (Number.isFinite(c) ? c : 0));
+              const val = Number(r.valor_mes) || 0;
+              vmap.set(mk, (vmap.get(mk) || 0) + val);
+            }
+            const months = Array.from(new Set([...map.keys(), ...vmap.keys()])).sort();
+            return { countsMap: map, valuesMap: vmap, months };
+          } catch (_) {
+            try { console.warn('TitulosAgg failed, will fallback'); } catch(_) {}
+            return null;
+          }
+        }
+
         // Função para re-renderizar o gráfico de percentual com dados filtrados
         async function renderPercentChartWithFilter(fromMonth, toMonth) {
           console.log('=== RENDERIZANDO GRÁFICO DE PERCENTUAL COM FILTRO ===');
@@ -1210,6 +1420,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: { duration: 0 },
               interaction: { mode: 'index', intersect: false },
               layout: { padding: { left: 2, right: 6, top: 2, bottom: 2 } },
               scales: {
@@ -1465,6 +1676,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: { duration: 0 },
               interaction: { mode: 'index', intersect: false },
               layout: { padding: { left: 2, right: 6, top: 2, bottom: 0 } },
               scales: {
@@ -2073,9 +2285,13 @@
           // Ajuste dinâmico de altura
           const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
-              const w = entry.contentRect.width;
-              canvas.style.height = computeHeight(w) + 'px';
-              if (window.__reportsChart) window.__reportsChart.resize();
+              const w = Math.floor(entry.contentRect.width);
+              if (wrapper.__lastW === w) continue;
+              wrapper.__lastW = w;
+              requestAnimationFrame(() => {
+                canvas.style.height = computeHeight(w) + 'px';
+                try { if (window.__reportsChart) window.__reportsChart.resize(); } catch(_) {}
+              });
             }
           });
           ro.observe(wrapper);
@@ -2242,6 +2458,700 @@
           }
 
           return filterContainer;
+        }
+
+        function ensureReportsCardsFilter(sectionEl) {
+          const existing = document.getElementById('reports-cards-filter');
+          if (existing) return existing;
+          const root = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const headings = Array.from(root.querySelectorAll('h1,h2'));
+          const reportsHeading = headings.find(h => /relatorios|relatórios/i.test(__norm(h.textContent || ''))) || null;
+          let subtitleEl = null;
+          if (reportsHeading) subtitleEl = reportsHeading.nextElementSibling || null;
+          if (!subtitleEl && reportsHeading) {
+            let cur = reportsHeading.nextElementSibling;
+            for (let i = 0; i < 6 && cur; i++) {
+              const t = __norm(cur.textContent || '');
+              if (/analytic|analytics|analises|análises/i.test(t)) { subtitleEl = cur; break; }
+              cur = cur.nextElementSibling;
+            }
+          }
+          const firstCard = Array.from(root.querySelectorAll('*')).find(el => /(total cobrado|clientes|whatsapp|email|tempo total de automacao|tempo total de automação|total de envios)/i.test(__norm(el.textContent || ''))) || null;
+          const container = (subtitleEl && firstCard) ? (__nearestCommonAncestor([subtitleEl, firstCard]) || (subtitleEl.parentElement || root)) : ((reportsHeading && reportsHeading.parentElement) || root);
+          const filterContainer = document.createElement('div');
+          filterContainer.id = 'reports-cards-filter';
+          filterContainer.style.cssText = 'background:#f8fafc;padding:12px 20px;margin-top:8px;margin-bottom:12px;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;width:100%;';
+          const filterLabel = document.createElement('span');
+          filterLabel.textContent = 'Filtrar Período:';
+          filterLabel.style.cssText = 'font-weight:600;color:#374151;';
+          const fromLabel = document.createElement('span');
+          fromLabel.textContent = 'De:';
+          fromLabel.style.cssText = 'font-weight:500;color:#374151;margin-left:8px;';
+          const fromInput = document.createElement('input');
+          fromInput.type = 'date';
+          fromInput.id = 'reports-cards-filter-from-date';
+          fromInput.setAttribute('aria-label','Data início');
+          fromInput.setAttribute('lang','pt-BR');
+          fromInput.placeholder = 'dd/MM/yyyy';
+          fromInput.style.cssText = 'padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;cursor:pointer;min-width:180px;max-width:260px;margin-left:4px;';
+          const fromWrap = document.createElement('div');
+          fromWrap.style.cssText = 'position:relative; display:inline-flex; align-items:center;';
+          fromWrap.appendChild(fromInput);
+          const toLabel = document.createElement('span');
+          toLabel.textContent = 'Até:';
+          toLabel.style.cssText = 'font-weight:500;color:#374151;margin-left:12px;';
+          const toInput = document.createElement('input');
+          toInput.type = 'date';
+          toInput.id = 'reports-cards-filter-to-date';
+          toInput.setAttribute('aria-label','Data fim');
+          toInput.setAttribute('lang','pt-BR');
+          toInput.placeholder = 'dd/MM/yyyy';
+          toInput.style.cssText = 'padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;cursor:pointer;min-width:180px;max-width:260px;margin-left:4px;';
+          const toWrap = document.createElement('div');
+          toWrap.style.cssText = 'position:relative; display:inline-flex; align-items:center;';
+          toWrap.appendChild(toInput);
+          const now = new Date();
+          const y = now.getFullYear();
+          const jan1 = new Date(y,0,1);
+          const toISO = (d) => {
+            const yy = d.getFullYear();
+            const mm = String(d.getMonth()+1).padStart(2,'0');
+            const dd = String(d.getDate()).padStart(2,'0');
+            return `${yy}-${mm}-${dd}`;
+          };
+          fromInput.value = toISO(jan1);
+          toInput.value = toISO(now);
+          try {
+            if (window.flatpickr) {
+              const fpFrom = window.flatpickr(fromInput, { dateFormat: 'Y-m-d', altInput: true, altFormat: 'd/m/Y', allowInput: true, defaultDate: fromInput.value, locale: 'pt' });
+              const fpTo = window.flatpickr(toInput, { dateFormat: 'Y-m-d', altInput: true, altFormat: 'd/m/Y', allowInput: true, defaultDate: toInput.value, locale: 'pt' });
+              if (fpFrom && fpFrom.altInput) {
+                fpFrom.setDate(fromInput.value, true, 'Y-m-d');
+                fpFrom.altInput.style.cssText = 'padding:6px 12px;padding-right:28px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;min-width:180px;max-width:260px;margin-left:4px;';
+                fromInput.style.display = 'none';
+                const caret = document.createElement('span');
+                caret.textContent = '▾';
+                caret.style.cssText = 'position:absolute; right:10px; color:#374151; cursor:pointer; user-select:none;';
+                caret.addEventListener('click', () => { try { fpFrom.open(); } catch(_){} });
+                fromWrap.appendChild(fpFrom.altInput);
+                fromWrap.appendChild(caret);
+              }
+              if (fpTo && fpTo.altInput) {
+                fpTo.setDate(toInput.value, true, 'Y-m-d');
+                fpTo.altInput.style.cssText = 'padding:6px 12px;padding-right:28px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;min-width:180px;max-width:260px;margin-left:4px;';
+                toInput.style.display = 'none';
+                const caret2 = document.createElement('span');
+                caret2.textContent = '▾';
+                caret2.style.cssText = 'position:absolute; right:10px; color:#374151; cursor:pointer; user-select:none;';
+                caret2.addEventListener('click', () => { try { fpTo.open(); } catch(_){} });
+                toWrap.appendChild(fpTo.altInput);
+                toWrap.appendChild(caret2);
+              }
+            }
+          } catch (_) {}
+          const applyButton = document.createElement('button');
+          applyButton.textContent = 'Aplicar';
+          applyButton.id = 'reports-cards-apply';
+          applyButton.style.cssText = 'background:#3b82f6;color:white;border:none;padding:8px 16px;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;margin-left:12px;';
+          applyButton.addEventListener('mouseenter', function(){ this.style.background = '#2563eb'; });
+          applyButton.addEventListener('mouseleave', function(){ this.style.background = '#3b82f6'; });
+          const toBr = (iso) => {
+            if (!iso) return '';
+            if (/\d{2}\/\d{2}\/\d{4}/.test(iso)) return iso;
+            const m = (iso || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+            if (!m) return '';
+            return `${m[3]}/${m[2]}/${m[1]}`;
+          };
+          applyButton.setAttribute('data-apply-bound','true');
+          applyButton.addEventListener('click', async (ev) => {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch(_){}
+            const fromAlt = fromWrap.querySelector('input[type="text"]');
+            const toAlt = toWrap.querySelector('input[type="text"]');
+            const fromValBr = (fromAlt && fromAlt.value) || toBr(fromInput.value || fromInput.getAttribute('value'));
+            const toValBr = (toAlt && toAlt.value) || toBr(toInput.value || toInput.getAttribute('value'));
+            const sec = findDailyHistorySection(findMainContentRoot());
+            if (fromValBr && toValBr) applyDailyHistoryFilterRange(fromValBr, toValBr, sec);
+            const brToISO = (br) => { const m = (br || '').match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/); return m ? `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}` : ''; };
+            const fISO = brToISO(fromValBr);
+            const tISO = brToISO(toValBr);
+            const ensureISO = (br, iso) => {
+              if (iso) return iso;
+              const digits = (br || '').replace(/[^0-9]/g, '');
+              if (digits.length !== 8) return '';
+              const d = digits.slice(0,2), m = digits.slice(2,4), y = digits.slice(4,8);
+              return `${y}-${m}-${d}`;
+            };
+            const fISOx = ensureISO(fromValBr, fISO);
+            const tISOx = ensureISO(toValBr, tISO);
+            if (fISOx && tISOx) {
+              const rows = await fetchRelatoriosMetricasByRange(fISOx, tISOx);
+              const m = computeCardsMetrics(rows);
+              renderMetricsCards(m);
+              const days = groupDailyMetrics(rows);
+              renderDailySummary(days);
+              updateCardsPeriodLabel(fISOx, tISOx);
+            }
+          }, true);
+          filterContainer.appendChild(filterLabel);
+          filterContainer.appendChild(fromLabel);
+          filterContainer.appendChild(fromWrap);
+          filterContainer.appendChild(toLabel);
+          filterContainer.appendChild(toWrap);
+          filterContainer.appendChild(applyButton);
+          const anchor = subtitleEl || reportsHeading || container.firstChild;
+          if (container && anchor) {
+            container.insertBefore(filterContainer, anchor.nextSibling);
+          } else if (container) {
+            container.insertBefore(filterContainer, container.firstChild);
+          }
+          return filterContainer;
+        }
+
+        async function fetchRelatoriosMetricasByRange(fromISO, toISO) {
+          try {
+            const fromTS = `${fromISO}T00:00:00`;
+            const toTS = `${toISO}T23:59:59`;
+            const url = `${SUPABASE_URL}/rest/v1/relatorios_metricas?select=*`
+              + `&data_referencia=gte.${encodeURIComponent(fromTS)}`
+              + `&data_referencia=lte.${encodeURIComponent(toTS)}`
+              + `&order=data_referencia.asc`;
+            const res = await fetch(url, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json', Prefer: 'count=exact' } });
+            if (!res.ok) {
+              try { console.error('Falha Supabase relatorios_metricas', res.status, await res.text()); } catch (_) {}
+              return [];
+            }
+            const data = await res.json();
+            try { console.log('Supabase relatorios_metricas rows', Array.isArray(data) ? data.length : 0, fromISO, toISO); } catch (_) {}
+            return Array.isArray(data) ? data : [];
+          } catch (e) { try { console.error('Erro fetchRelatoriosMetricasByRange', e); } catch(_){} return []; }
+        }
+
+        function intFormat(n) {
+          const v = Number(n) || 0;
+          return v.toLocaleString('pt-BR');
+        }
+
+        function moedaBRL(n) {
+          const v = Number(n) || 0;
+          return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+
+        function formatSecondsToHMS(s) {
+          const t = Math.max(0, Number(s) || 0);
+          const h = Math.floor(t / 3600);
+          const m = Math.floor((t % 3600) / 60);
+          const sec = Math.floor(t % 60);
+          return `${h}h ${m}m ${sec}s`;
+        }
+
+        function computeCardsMetrics(rows) {
+          let total_cobrado = 0, clientes_contactados = 0, tempo_total_automacao_segundos = 0, total_mensagens_enviadas = 0, whatsapp_mensagens_enviadas = 0, email_mensagens_enviadas = 0;
+          for (const r of rows) {
+            total_cobrado += Number(r?.total_cobrado || 0);
+            clientes_contactados += Number(r?.clientes_contactados || 0);
+            tempo_total_automacao_segundos += Number(r?.tempo_total_automacao_segundos || 0);
+            total_mensagens_enviadas += Number(r?.total_mensagens_enviadas || 0);
+            whatsapp_mensagens_enviadas += Number(r?.whatsapp_mensagens_enviadas || 0);
+            email_mensagens_enviadas += Number(r?.email_mensagens_enviadas || 0);
+          }
+          return { total_cobrado, clientes_contactados, tempo_total_automacao_segundos, total_mensagens_enviadas, whatsapp_mensagens_enviadas, email_mensagens_enviadas };
+        }
+
+        function ensureMetricsCardsContainer(sectionEl) {
+          const existing = document.getElementById('reports-cards-metrics');
+          if (existing) return existing;
+          const root = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const wrapper = document.createElement('div');
+          wrapper.id = 'reports-cards-metrics';
+          wrapper.style.cssText = 'width:100%;max-width:90%;margin:12px auto;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;';
+          const mkCard = (title, id, accent) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,0.06);';
+            const h = document.createElement('div');
+            h.textContent = title;
+            h.style.cssText = 'font-weight:600;color:#374151;margin-bottom:6px;';
+            const v = document.createElement('div');
+            v.id = id;
+            v.textContent = '—';
+            v.style.cssText = `font-weight:700;font-size:24px;color:${accent}`;
+            const s = document.createElement('div');
+            s.textContent = 'Período selecionado';
+            s.style.cssText = 'font-size:12px;color:#6b7280;margin-top:4px;';
+            card.appendChild(h);
+            card.appendChild(v);
+            card.appendChild(s);
+            return card;
+          };
+          const row1 = [
+            mkCard('Total Cobrado', 'card-total-cobrado', '#111827'),
+            mkCard('Clientes Contactados', 'card-clientes-contactados', '#1e3a8a'),
+            mkCard('Tempo Total de Automação', 'card-tempo-automacao', '#1e3a8a')
+          ];
+          const row2 = [
+            mkCard('Total de Envios', 'card-total-envios', '#111827'),
+            mkCard('Total de envios - WhatsApp', 'card-total-whatsapp', '#059669'),
+            mkCard('Total de envios - Email', 'card-total-email', '#2563eb')
+          ];
+          [...row1, ...row2].forEach(c => wrapper.appendChild(c));
+          const anchor = document.getElementById('reports-cards-filter');
+          const container = root;
+          if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(wrapper, anchor.nextSibling);
+          else container.insertBefore(wrapper, sectionEl && sectionEl.nextSibling ? sectionEl.nextSibling : null);
+          return wrapper;
+        }
+
+        function renderMetricsCards(m) {
+          const map = [
+            ['card-total-cobrado', moedaBRL(m.total_cobrado)],
+            ['card-clientes-contactados', intFormat(m.clientes_contactados)],
+            ['card-tempo-automacao', formatSecondsToHMS(m.tempo_total_automacao_segundos)],
+            ['card-total-envios', intFormat(m.total_mensagens_enviadas)],
+            ['card-total-whatsapp', intFormat(m.whatsapp_mensagens_enviadas)],
+            ['card-total-email', intFormat(m.email_mensagens_enviadas)]
+          ];
+          for (const [id, val] of map) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+          }
+        }
+
+        function updateCardsPeriodLabel(fromISO, toISO) {
+          const toBr = (iso) => { const m = (iso||'').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : iso; };
+          const msg = (fromISO && toISO) ? `De ${toBr(fromISO)} até ${toBr(toISO)}` : 'Período selecionado';
+          const wrapper = document.getElementById('reports-cards-metrics');
+          if (!wrapper) return;
+          const subtitles = Array.from(wrapper.querySelectorAll('div')).filter(d => /per[ií]odo\s*selecionado/i.test((d.textContent||'').toLowerCase()));
+          subtitles.forEach(s => { s.textContent = msg; });
+        }
+
+        function removeDuplicateMetricsCards() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const container = findMainContentRoot();
+            const hist = findDailyHistorySection(container);
+            const dailySummary = document.getElementById('reports-daily-summary');
+            if (!anchor) return;
+            const isFollowing = (a, b) => {
+              try { return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; }
+            };
+            const isBefore = (el, ref) => {
+              if (!ref) return true;
+              try { return !!(el.compareDocumentPosition(ref) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; }
+            };
+            const hasTitle = (el) => {
+              const t = __norm(el.textContent || '');
+              return /(total\s*cobrado|clientes\s*contactados|tempo\s*total\s*de\s*automacao|tempo\s*total\s*de\s*automação|total\s*de\s*envios|whatsapp|email)/i.test(t);
+            };
+            const elements = Array.from(document.querySelectorAll('div,section,article'));
+            const legacyMarkers = [/mensagens\s*enviadas/i, /canal\s*ativo/i, /autom[aç]ao\s*ativa/i, /baseado\s*em\s*dados\s*reais/i];
+            const upperBound = dailySummary || hist;
+            const blocks = elements.filter(el => !anchor.contains(el) && isFollowing(anchor, el) && isBefore(el, upperBound) && el.getAttribute('data-daily-summary') !== 'true' && !el.closest('#reports-daily-summary'));
+            const candidates = blocks.filter(el => {
+              const txt = __norm(el.textContent || '');
+              const titlesCount = ['total cobrado','clientes contactados','tempo total de automacao','tempo total de automação','total de envios','whatsapp','email'].filter(s => txt.includes(s)).length;
+              const hasLegacy = legacyMarkers.some(r => r.test(txt));
+              return titlesCount >= 5 || hasLegacy;
+            });
+            if (!candidates.length) return;
+            const groupContainer = __nearestCommonAncestor(candidates) || (candidates[0] && candidates[0].parentElement);
+            if (!groupContainer) return;
+            if (groupContainer === anchor || anchor.contains(groupContainer)) return;
+            if (groupContainer.closest && groupContainer.closest('#reports-daily-summary')) return;
+            const txt = __norm(groupContainer.textContent || '');
+            const titlesCount = ['total cobrado','clientes contactados','tempo total de automacao','tempo total de automação','total de envios','whatsapp','email'].filter(s => txt.includes(s)).length;
+            if (titlesCount >= 5 || legacyMarkers.some(r => r.test(txt))) {
+              try { groupContainer.classList.add('__hideLegacy'); groupContainer.setAttribute('data-legacy-hidden','true'); } catch(_) {}
+            }
+          } catch(_) {}
+        }
+
+        function removeLegacyCardsExact() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const container = findMainContentRoot();
+            const hist = findDailyHistorySection(container);
+            const dailySummary = document.getElementById('reports-daily-summary');
+            if (!anchor) return;
+            const isFollowing = (a, b) => {
+              try { return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; }
+            };
+            const isBefore = (el, ref) => {
+              if (!ref) return true;
+              try { return !!(el.compareDocumentPosition(ref) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; }
+            };
+            const upper = dailySummary || hist;
+            const nodes = Array.from(document.querySelectorAll('div,section,article')).filter(el => !anchor.contains(el) && isFollowing(anchor, el) && isBefore(el, upper));
+            const titles = ['total cobrado','clientes contactados','tempo total de automacao','tempo total de automação','total de envios','total de envios - whatsapp','total de envios - email','whatsapp','email'];
+            const legacy = [/mensagens\s*enviadas/i, /canal\s*ativo/i, /autom[aç]ao\s*ativa/i, /baseado\s*em\s*dados\s*reais/i];
+            const hits = nodes.filter(el => {
+              const txt = __norm(el.textContent || '');
+              const tcount = titles.filter(s => txt.includes(s)).length;
+              const hasLegacy = legacy.some(r => r.test(txt));
+              return (tcount >= 6) || (tcount >= 4 && hasLegacy);
+            });
+            if (!hits.length) return;
+            const block = __nearestCommonAncestor(hits) || (hits[0] && hits[0].parentElement);
+            if (!block) return;
+            if (block === anchor || anchor.contains(block)) return;
+            if (block.closest && block.closest('#reports-daily-summary')) return;
+            try { block.classList.add('__hideLegacy'); block.setAttribute('data-legacy-hidden','true'); } catch(_) {}
+          } catch(_) {}
+        }
+
+        function removeLegacyCardsByTitles() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const container = findMainContentRoot();
+            const dailySummary = document.getElementById('reports-daily-summary');
+            const upper = dailySummary || findDailyHistorySection(container);
+            if (!anchor) return;
+            const isFollowing = (a, b) => { try { return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; } };
+            const isBefore = (el, ref) => { if (!ref) return true; try { return !!(el.compareDocumentPosition(ref) & Node.DOCUMENT_POSITION_FOLLOWING); } catch(_) { return false; } };
+            const titles = [
+              /\btotal\s*cobrado\b/i,
+              /\bclientes\s*contactados\b/i,
+              /\btempo\s*total\s*de\s*autom[aç]ao\b/i,
+              /\btotal\s*de\s*envios\b/i,
+              /\btotal\s*de\s*envios\s*\-\s*whatsapp\b/i,
+              /\btotal\s*de\s*envios\s*\-\s*email\b/i
+            ];
+            const matches = [];
+            const all = Array.from(document.querySelectorAll('*'));
+            for (const re of titles) {
+              const el = all.find(node => re.test(__norm(node.textContent || '')) && !anchor.contains(node) && isFollowing(anchor, node) && isBefore(node, upper));
+              if (el) matches.push(el);
+            }
+            if (matches.length < 4) return;
+            const target = __nearestCommonAncestor(matches) || (matches[0] && matches[0].parentElement);
+            if (!target) return;
+            if (target === anchor || anchor.contains(target)) return;
+            if (target.closest && target.closest('#reports-daily-summary')) return;
+            try { target.classList.add('__hideLegacy'); target.setAttribute('data-legacy-hidden','true'); } catch(_) {}
+          } catch(_) {}
+        }
+
+        function removeFollowingLegacyBlocks() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            if (!anchor) return;
+            const isLegacy = (el) => {
+              const t = __norm(el.textContent || '');
+              const keywords = ['mensagens enviadas','canal ativo','automacao ativa','automação ativa','baseado em dados reais'];
+              const titles = ['total cobrado','clientes contactados','tempo total de automacao','tempo total de automação','total de envios','whatsapp','email'];
+              const k = keywords.some(k => t.includes(k));
+              const tc = titles.filter(s => t.includes(s)).length;
+              return k || tc >= 5;
+            };
+            const stopId = 'reports-daily-summary';
+            let cur = anchor.nextElementSibling;
+            let guard = 0;
+            while (cur && cur.id !== stopId && guard < 20) {
+              const next = cur.nextElementSibling;
+              if (isLegacy(cur)) {
+                try { cur.classList.add('__hideLegacy'); cur.remove(); } catch (_) {}
+              }
+              cur = next;
+              guard++;
+            }
+          } catch (_) {}
+        }
+
+        function removeLegacyCardsHard() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const dailySummary = document.getElementById('reports-daily-summary');
+            const container = findMainContentRoot();
+            if (!anchor || !container) return;
+            const upperBound = dailySummary || findDailyHistorySection(container);
+            const keywords = ['mensagens enviadas','canal ativo','automacao ativa','automação ativa','baseado em dados reais'];
+            const titles = ['total cobrado','clientes contactados','tempo total de automacao','tempo total de automação','total de envios','total de envios - whatsapp','total de envios - email','whatsapp','email'];
+            const between = [];
+            let cur = anchor.nextElementSibling;
+            let limit = 0;
+            while (cur && limit < 40) {
+              if (cur === upperBound) break;
+              const txt = __norm(cur.textContent || '');
+              const matchK = keywords.some(k => txt.includes(k));
+              const matchT = titles.filter(s => txt.includes(s)).length;
+              const looksLikeCardsGrid = /grid|cards|card|chakra-card|mantine-card|shadow|border|rounded/i.test(cur.className || '');
+              if ((matchK || matchT >= 5) && looksLikeCardsGrid) between.push(cur);
+              cur = cur.nextElementSibling;
+              limit++;
+            }
+            if (!between.length) return;
+            const target = __nearestCommonAncestor(between) || (between[0] && between[0].parentElement);
+            if (!target) return;
+            if (target.contains(anchor) || (dailySummary && target.contains(dailySummary))) return;
+            try { target.classList.add('__hideLegacy'); target.remove(); } catch (_) {}
+          } catch (_) {}
+        }
+
+        function removeAllBetweenCardsAndDaily() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const daily = document.getElementById('reports-daily-summary');
+            if (!anchor || !daily) return;
+            let cur = anchor.nextSibling;
+            let guard = 0;
+            while (cur && cur !== daily && guard < 50) {
+              const next = cur.nextSibling;
+              if (cur.nodeType === 1) {
+                const el = cur;
+                // Não remover nós críticos
+                const id = (el.id || '').toLowerCase();
+                const isCritical = id.startsWith('reports-') || el.closest('#reports-daily-summary');
+                if (!isCritical) {
+                  try { el.remove(); } catch (_) {}
+                }
+              } else {
+                try { cur.parentNode && cur.parentNode.removeChild(cur); } catch (_) {}
+              }
+              cur = next;
+              guard++;
+            }
+          } catch (_) {}
+        }
+
+        function removeGlobalLegacyCards() {
+          try {
+            const anchor = document.getElementById('reports-cards-metrics');
+            const daily = document.getElementById('reports-daily-summary');
+            const container = findMainContentRoot();
+            const keywords = [/mensagens\s*enviadas/i, /canal\s*ativo/i, /autom[aç]ao\s*ativa/i, /baseado\s*em\s*dados\s*reais/i];
+            const nodes = Array.from(container.querySelectorAll('*')).filter(el => {
+              const t = __norm(el.textContent || '');
+              return keywords.some(r => r.test(t));
+            });
+            if (!nodes.length) return;
+            for (const node of nodes) {
+              let p = node;
+              let hops = 0;
+              while (p && p !== document.body && hops < 12) {
+                const id = (p.id || '').toLowerCase();
+                if (id.startsWith('reports-') || (daily && p.contains(daily)) || (anchor && p.contains(anchor))) break;
+                const txt = __norm(p.textContent || '');
+                const hasKW = keywords.some(r => r.test(txt));
+                const looksCard = /card|chakra-card|mantine-Card|border|shadow|rounded|mx-|my-|px-|py-|grid|flex/i.test(p.className || '');
+                if (hasKW && looksCard) {
+                  try { p.classList.add('__hideLegacy'); p.setAttribute('data-legacy-hidden','true'); p.remove(); } catch(_) {}
+                  break;
+                }
+                p = p.parentElement;
+                hops++;
+              }
+            }
+          } catch (_) {}
+        }
+
+        async function rebuildReportsSection() {
+          try {
+            const container = findMainContentRoot();
+            const sectionEl = findDailyHistorySection(container);
+            ensureReportsCardsFilter(sectionEl);
+            ensureMetricsCardsContainer(sectionEl);
+            const now = new Date();
+            const y = now.getFullYear();
+            const jan1 = `${y}-01-01`;
+            const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            try { await loadAndRenderCards(jan1, today); } catch(_) {}
+            ensureDailySummaryContainer(sectionEl);
+            try { await loadAndRenderDailySummary(jan1, today); } catch(_) {}
+            const topWrapper = ensureTopChartContainer(sectionEl);
+            const percWrapper = ensurePercentChartContainer(sectionEl);
+            const bottomWrapper = ensureChartContainer(sectionEl);
+            ensureBottomChartFilter(sectionEl);
+            const mixWrapper = ensureMixTitulosChartContainer(sectionEl);
+            ensureMixTitulosChartFilter(sectionEl);
+            if (!window.__reportsTopChartInited) { try { await renderTopChart(parseTableData(sectionEl)); window.__reportsTopChartInited = true; } catch(_) {} }
+            if (!window.__reportsPercentChartInited) { try { await renderPercentChart(parseTableData(sectionEl)); window.__reportsPercentChartInited = true; } catch(_) {} }
+            if (!window.__reportsChartInited) { try { await renderChart(parseTableData(sectionEl)); window.__reportsChartInited = true; } catch(_) {} }
+            if (!window.__reportsMixTitulosChartInited) { try { await renderMixTitulosChart(); window.__reportsMixTitulosChartInited = true; } catch(_) {} }
+            requestAnimationFrame(() => { setTimeout(() => {
+              if (topWrapper) topWrapper.style.opacity = '1';
+              if (percWrapper) percWrapper.style.opacity = '1';
+              if (bottomWrapper) bottomWrapper.style.opacity = '1';
+              if (mixWrapper) mixWrapper.style.opacity = '1';
+            }, 120); });
+          } catch (_) {}
+        }
+
+        function removeLegacyDailyBlock() {
+          try {
+            const root = findMainContentRoot();
+            const heads = Array.from(root.querySelectorAll('h3'));
+            const head = heads.find(h => /historico diario|histórico diário/i.test(__norm(h.textContent || '')) && h.parentElement && ((h.parentElement.className || '').includes('p-6')));
+            const bodyWrap = Array.from(root.querySelectorAll('div')).find(d => {
+              const cn = (d.className || '').toLowerCase();
+              return cn.includes('space-y-4') && cn.includes('max-h-96') && cn.includes('overflow-y-auto');
+            });
+            const a = head && head.parentElement;
+            const b = bodyWrap && bodyWrap.parentElement;
+            const target = (a && b) ? (__nearestCommonAncestor([a,b]) || a.parentElement || b.parentElement) : (a || b);
+            if (!target) return;
+            if (target.getAttribute && target.getAttribute('data-daily-summary') === 'true') return;
+            if (target.closest && target.closest('#reports-daily-summary')) return;
+            try { target.remove(); } catch (_) {}
+          } catch (_) {}
+        }
+
+        async function loadAndRenderCards(fromISO, toISO) {
+          const rows = await fetchRelatoriosMetricasByRange(fromISO, toISO);
+          let m = null;
+          if (Array.isArray(rows) && rows.length) {
+            m = computeCardsMetrics(rows);
+          } else {
+            const domM = (function(){
+              try {
+                const list = document.getElementById('reports-daily-summary-list');
+                if (!list) return null;
+                const rows = Array.from(list.children).filter(r => r && r.style.display !== 'none');
+                const parseBRL = (txt) => {
+                  const m = (txt||'').match(/([Rr]\$)?\s*([0-9]{1,3}(?:\.[0-9]{3})*)(?:,([0-9]{1,2}))?/);
+                  if (!m) return 0;
+                  const num = m[2].replace(/\./g,'') + ',' + (m[3]||'00');
+                  return Number(num.replace(/\./g,'').replace(/,/g,'.')) || 0;
+                };
+                const parseIntBR = (txt) => {
+                  const d = (txt||'').replace(/[^0-9]/g,'');
+                  return Number(d) || 0;
+                };
+                const getVal = (row, labelRx) => {
+                  const lab = Array.from(row.querySelectorAll('div')).find(d => labelRx.test((d.textContent||'').toLowerCase()));
+                  if (!lab || !lab.parentElement) return 0;
+                  const parent = lab.parentElement;
+                  const valEl = parent.children && parent.children[1];
+                  const txt = valEl ? (valEl.textContent||'') : '';
+                  if (/total\s*cobrado/i.test(lab.textContent||'')) return parseBRL(txt);
+                  return parseIntBR(txt);
+                };
+                let total_cobrado = 0, clientes_contactados = 0, total_mensagens_enviadas = 0, whatsapp_mensagens_enviadas = 0, email_mensagens_enviadas = 0;
+                for (const r of rows) {
+                  total_cobrado += getVal(r, /total\s*cobrado/i);
+                  clientes_contactados += getVal(r, /clientes\b/i);
+                  whatsapp_mensagens_enviadas += getVal(r, /whatsapp/i);
+                  email_mensagens_enviadas += getVal(r, /email/i);
+                }
+                total_mensagens_enviadas = whatsapp_mensagens_enviadas + email_mensagens_enviadas;
+                const tempoTxt = (document.getElementById('card-tempo-automacao') || {}).textContent || '';
+                const tm = (function(t){
+                  const h = ((t.match(/(\d+)\s*h/)||[])[1])||0;
+                  const m = ((t.match(/(\d+)\s*m/)||[])[1])||0;
+                  const s = ((t.match(/(\d+)\s*s/)||[])[1])||0;
+                  return (Number(h)||0)*3600 + (Number(m)||0)*60 + (Number(s)||0);
+                })(tempoTxt);
+                return { total_cobrado, clientes_contactados, tempo_total_automacao_segundos: tm, total_mensagens_enviadas, whatsapp_mensagens_enviadas, email_mensagens_enviadas };
+              } catch(_) { return null; }
+            })();
+            m = domM || { total_cobrado:0, clientes_contactados:0, tempo_total_automacao_segundos:0, total_mensagens_enviadas:0, whatsapp_mensagens_enviadas:0, email_mensagens_enviadas:0 };
+          }
+          renderMetricsCards(m);
+        }
+
+        function ensureDailySummaryContainer(sectionEl) {
+          let box = document.getElementById('reports-daily-summary');
+          if (box) return box;
+          const root = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          box = document.createElement('div');
+          box.id = 'reports-daily-summary';
+          box.setAttribute('data-daily-summary','true');
+          box.style.cssText = 'background:#f8fafc;padding:12px 14px;margin-top:8px;margin-bottom:12px;border:1px solid #e2e8f0;border-radius:12px;width:100%;max-width:90%;margin-left:auto;margin-right:auto;';
+          const head = document.createElement('div');
+          head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;color:#111827;font-weight:700;font-size:18px;';
+          const icon = document.createElementNS('http://www.w3.org/2000/svg','svg');
+          icon.setAttribute('viewBox','0 0 24 24');
+          icon.setAttribute('width','20');
+          icon.setAttribute('height','20');
+          icon.setAttribute('fill','none');
+          icon.setAttribute('stroke','#111827');
+          icon.setAttribute('stroke-width','1.75');
+          icon.setAttribute('stroke-linecap','round');
+          icon.setAttribute('stroke-linejoin','round');
+          const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+          rect.setAttribute('x','3');
+          rect.setAttribute('y','5');
+          rect.setAttribute('width','18');
+          rect.setAttribute('height','16');
+          rect.setAttribute('rx','2');
+          const bindL = document.createElementNS('http://www.w3.org/2000/svg','line');
+          bindL.setAttribute('x1','8'); bindL.setAttribute('y1','2'); bindL.setAttribute('x2','8'); bindL.setAttribute('y2','6');
+          const bindR = document.createElementNS('http://www.w3.org/2000/svg','line');
+          bindR.setAttribute('x1','16'); bindR.setAttribute('y1','2'); bindR.setAttribute('x2','16'); bindR.setAttribute('y2','6');
+          const row = document.createElementNS('http://www.w3.org/2000/svg','line');
+          row.setAttribute('x1','3'); row.setAttribute('y1','10'); row.setAttribute('x2','21'); row.setAttribute('y2','10');
+          icon.appendChild(rect); icon.appendChild(bindL); icon.appendChild(bindR); icon.appendChild(row);
+          const title = document.createElement('span');
+          title.textContent = 'Histórico Diário';
+          head.appendChild(icon);
+          head.appendChild(title);
+          const list = document.createElement('div');
+          list.id = 'reports-daily-summary-list';
+          list.style.cssText = 'display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;padding-right:6px;';
+          box.appendChild(head);
+          box.appendChild(list);
+          const anchor = document.getElementById('reports-cards-metrics');
+          const container = root;
+          if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor.nextSibling);
+          else container.insertBefore(box, sectionEl && sectionEl.nextSibling ? sectionEl.nextSibling : null);
+          return box;
+        }
+
+        function groupDailyMetrics(rows) {
+          const byDay = new Map();
+          for (const r of (rows || [])) {
+            const d = r && r.data_referencia;
+            if (!d) continue;
+            const cur = byDay.get(d) || { total_cobrado:0, clientes_contactados:0, whatsapp_mensagens_enviadas:0, email_mensagens_enviadas:0 };
+            cur.total_cobrado += Number(r.total_cobrado || 0);
+            cur.clientes_contactados += Number(r.clientes_contactados || 0);
+            cur.whatsapp_mensagens_enviadas += Number(r.whatsapp_mensagens_enviadas || 0);
+            cur.email_mensagens_enviadas += Number(r.email_mensagens_enviadas || 0);
+            byDay.set(d, cur);
+          }
+          const arr = Array.from(byDay.entries()).map(([dateISO, vals]) => ({ dateISO, ...vals }));
+          arr.sort((a,b) => (a.dateISO < b.dateISO ? 1 : -1));
+          return arr;
+        }
+
+        function renderDailySummary(days) {
+          const box = ensureDailySummaryContainer(findDailyHistorySection(findMainContentRoot()));
+          const list = document.getElementById('reports-daily-summary-list');
+          if (!list) return;
+          while (list.firstChild) list.removeChild(list.firstChild);
+          const week = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+          const toBr = (iso) => { const m = (iso||'').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : iso; };
+          for (const d of days) {
+            const row = document.createElement('div');
+            row.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;';
+            const top = document.createElement('div');
+            top.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
+            const left = document.createElement('div');
+            left.style.cssText = 'display:flex;align-items:center;gap:6px;color:#111827;font-weight:700;';
+            const dateTxt = document.createElement('span');
+            dateTxt.textContent = toBr(d.dateISO);
+            const dow = document.createElement('span');
+            const dt = new Date(d.dateISO);
+            dow.textContent = week[dt.getDay()] || '';
+            dow.style.cssText = 'font-size:11px;color:#111827;background:#f1f5f9;padding:3px 7px;border-radius:999px;';
+            left.appendChild(dateTxt);
+            top.appendChild(left);
+            top.appendChild(dow);
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;';
+            const mk = (label, val, color) => { const w = document.createElement('div'); w.style.cssText = 'display:flex;flex-direction:column;gap:2px;'; const l = document.createElement('div'); l.textContent = label; l.style.cssText = 'font-size:12px;color:#6b7280;'; const v = document.createElement('div'); v.textContent = val; v.style.cssText = `font-weight:700;color:${color};font-size:14px;`; w.appendChild(l); w.appendChild(v); return w; };
+            grid.appendChild(mk('Total Cobrado', moedaBRL(d.total_cobrado), '#111827'));
+            grid.appendChild(mk('Clientes', intFormat(d.clientes_contactados), '#1e3a8a'));
+            grid.appendChild(mk('WhatsApp', intFormat(d.whatsapp_mensagens_enviadas), '#059669'));
+            grid.appendChild(mk('Email', intFormat(d.email_mensagens_enviadas), '#2563eb'));
+            row.appendChild(top);
+            row.appendChild(grid);
+            list.appendChild(row);
+          }
+        }
+
+        async function loadAndRenderDailySummary(fromISO, toISO) {
+          const rows = await fetchRelatoriosMetricasByRange(fromISO, toISO);
+          const days = groupDailyMetrics(rows);
+          renderDailySummary(days);
         }
 
         // Gera relatório em PDF para "Inadimplência - Inicial X 1 mês"
@@ -2606,9 +3516,13 @@
 
           const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
-              const w = entry.contentRect.width;
-              canvas.style.height = computeTopHeight(w) + 'px';
-              if (window.__reportsTopChart) window.__reportsTopChart.resize();
+              const w = Math.floor(entry.contentRect.width);
+              if (wrapper.__lastW === w) continue;
+              wrapper.__lastW = w;
+              requestAnimationFrame(() => {
+                canvas.style.height = computeTopHeight(w) + 'px';
+                try { if (window.__reportsTopChart) window.__reportsTopChart.resize(); } catch(_) {}
+              });
             }
           });
           ro.observe(wrapper);
@@ -2831,13 +3745,289 @@
 
           const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
-              const w = entry.contentRect.width;
-              canvas.style.height = computePercentHeight(w) + 'px';
-              if (window.__reportsPercentChart) window.__reportsPercentChart.resize();
+              const w = Math.floor(entry.contentRect.width);
+              if (wrapper.__lastW === w) continue;
+              wrapper.__lastW = w;
+              requestAnimationFrame(() => {
+                canvas.style.height = computePercentHeight(w) + 'px';
+                try { if (window.__reportsPercentChart) window.__reportsPercentChart.resize(); } catch(_) {}
+              });
             }
           });
           ro.observe(wrapper);
           return wrapper;
+        }
+
+        function ensureMixTitulosChartContainer(sectionEl) {
+          const existing = document.getElementById(MIX_TITULOS_CHART_ID);
+          if (existing) return existing;
+          const wrapper = document.createElement('div');
+          wrapper.id = MIX_TITULOS_CHART_ID;
+          applyChartWrapperStyle(wrapper);
+          const canvas = document.createElement('canvas');
+          canvas.id = MIX_TITULOS_CHART_ID + '-canvas';
+          canvas.style.width = '100%';
+          canvas.style.height = computePercentHeight(wrapper.clientWidth) + 'px';
+          wrapper.appendChild(canvas);
+          const container = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const belowNode = document.getElementById(CHART_ID);
+          const footerAnchor = findFooterAnchor();
+          if (belowNode && belowNode.parentNode) {
+            belowNode.parentNode.insertBefore(wrapper, belowNode.nextSibling);
+          } else if (footerAnchor && footerAnchor.parentNode === container) {
+            container.insertBefore(wrapper, footerAnchor);
+          } else if (footerAnchor && footerAnchor.parentNode) {
+            footerAnchor.parentNode.insertBefore(wrapper, footerAnchor);
+          } else {
+            container.insertBefore(wrapper, sectionEl && sectionEl.nextSibling ? sectionEl.nextSibling : null);
+          }
+          const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+              const w = Math.floor(entry.contentRect.width);
+              if (wrapper.__lastW === w) continue;
+              wrapper.__lastW = w;
+              requestAnimationFrame(() => {
+                canvas.style.height = computePercentHeight(w) + 'px';
+                try { if (window.__reportsMixTitulosChart) window.__reportsMixTitulosChart.resize(); } catch(_) {}
+              });
+            }
+          });
+          ro.observe(wrapper);
+          return wrapper;
+        }
+
+        async function renderMixTitulosChart() {
+          const ctx = document.getElementById(MIX_TITULOS_CHART_ID + '-canvas');
+          if (!ctx || !window.Chart) return;
+          const base = await fetchInadimplenciaData();
+          const tit = await fetchTitulosAbertoCountsAgg() || await fetchTitulosAbertoCounts();
+          const pct = await fetchPercentualData();
+          const baseKeys = (base.labels || []).map(__monthKeyFromLabel).filter(Boolean);
+          const titKeys = Array.from((tit.countsMap || new Map()).keys());
+          const pctKeys = (pct.labels || []).map(__monthKeyFromLabel).filter(Boolean);
+          const set = new Set();
+          baseKeys.forEach(k => set.add(k));
+          titKeys.forEach(k => set.add(k));
+          pctKeys.forEach(k => set.add(k));
+          const union = Array.from(set).sort();
+          const labels = union.map(__formatMonthLabel);
+          const tmap = tit.countsMap || new Map();
+          const bmap = new Map((base.labels || []).map((l,i) => [__monthKeyFromLabel(l), (base.inadimplentes || [])[i] || 0]));
+          const pmap = new Map((pct.labels || []).map((l,i) => [__monthKeyFromLabel(l), (pct.percentuais || [])[i] || 0]));
+          const titulos = union.map(k => tmap.get(k) || 0);
+          const inadimplentes = union.map(k => bmap.get(k) || 0);
+          const percentual = union.map(k => pmap.get(k) || 0);
+          try { console.log('MixTitulos:init union', union, 'tit', titulos, 'inad', inadimplentes, 'pct', percentual); } catch(_){ }
+          if (window.__reportsMixTitulosChart) { try { window.__reportsMixTitulosChart.destroy(); } catch(_){} }
+          window.__reportsMixTitulosChart = new Chart(ctx, {
+            data: {
+              labels,
+              datasets: [
+                { type: 'bar', label: 'N° de títulos', data: titulos, backgroundColor: 'rgba(59,130,246,0.85)', borderRadius: 8, maxBarThickness: 38, barPercentage: 0.9, categoryPercentage: 0.9 },
+                { type: 'bar', label: 'Inadimplentes', data: inadimplentes, backgroundColor: 'rgba(239,68,68,0.85)', borderRadius: 8, maxBarThickness: 38, barPercentage: 0.9, categoryPercentage: 0.9 },
+                { type: 'line', label: 'Percentual de inadimplência', data: percentual, borderColor: 'rgba(234,179,8,0.9)', backgroundColor: 'rgba(234,179,8,0.25)', yAxisID: 'y1', tension: 0.35, pointRadius: 3 }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: { duration: 0 },
+              interaction: { mode: 'index', intersect: false },
+              layout: { padding: { left: 2, right: 6, top: 2, bottom: 2 } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: 'rgba(0,0,0,0.65)' } },
+                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: 'rgba(0,0,0,0.65)' } },
+                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: 'rgba(0,0,0,0.65)', callback: (v) => v + '%' }, title: { display: true, text: 'Percentual' } }
+              },
+              plugins: {
+                title: { display: true, text: 'Inadimplentes X N° de Títulos X Percentual de inadimplência', color: 'rgba(0,0,0,0.8)', align: 'center', font: { weight: '600', size: 15 } },
+                legend: { display: true, position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 12 } },
+                tooltip: { padding: 10, displayColors: true, callbacks: { label: (ctx) => ctx.dataset.label + ': ' + ctx.formattedValue + (ctx.dataset.yAxisID === 'y1' ? '%' : '') } }
+              },
+              elements: { line: { borderWidth: 2 }, point: { radius: 3 } }
+            }
+          });
+        }
+
+        async function renderMixTitulosChartWithFilter(fromMonth, toMonth) {
+          const ctx = document.getElementById(MIX_TITULOS_CHART_ID + '-canvas');
+          if (!ctx || !window.Chart) return;
+          const base = await fetchInadimplenciaData();
+          const filtered = filterDataByPeriod(base, fromMonth, toMonth);
+          const tit = await fetchTitulosAbertoCountsAgg() || await fetchTitulosAbertoCounts();
+          const fm = parseInt(fromMonth, 10);
+          const tm = parseInt(toMonth, 10);
+          const tmap = tit.countsMap || new Map();
+          const filtTitKeys = Array.from(tmap.keys()).filter(k => { const m = parseInt((k.split('-')[1]||'0'),10); return m>=fm && m<=tm; });
+          const baseKeys = (filtered.labels || []).map(__monthKeyFromLabel).filter(Boolean);
+          const set = new Set();
+          baseKeys.forEach(k => set.add(k));
+          filtTitKeys.forEach(k => set.add(k));
+          const union = Array.from(set).sort();
+          const labels = union.map(__formatMonthLabel);
+          const bmap = new Map((filtered.labels || []).map((l,i) => [__monthKeyFromLabel(l), (filtered.inadimplentes || [])[i] || 0]));
+          const titulos = union.map(k => tmap.get(k) || 0);
+          const inadimplentes = union.map(k => bmap.get(k) || 0);
+          const totalGeral = inadimplentes.reduce((s,v)=>s+v,0);
+          const percentual = union.map(k => totalGeral > 0 ? ((bmap.get(k)||0)/totalGeral)*100 : 0);
+          try { console.log('MixTitulos:filter union', union, 'tit', titulos, 'inad', inadimplentes, 'pct', percentual); } catch(_){ }
+          if (window.__reportsMixTitulosChart) { try { window.__reportsMixTitulosChart.destroy(); } catch(_){} }
+          window.__reportsMixTitulosChart = new Chart(ctx, {
+            data: {
+              labels,
+              datasets: [
+                { type: 'bar', label: 'N° de títulos', data: titulos, backgroundColor: 'rgba(59,130,246,0.85)', borderRadius: 8, maxBarThickness: 38, barPercentage: 0.9, categoryPercentage: 0.9 },
+                { type: 'bar', label: 'Inadimplentes', data: inadimplentes, backgroundColor: 'rgba(239,68,68,0.85)', borderRadius: 8, maxBarThickness: 38, barPercentage: 0.9, categoryPercentage: 0.9 },
+                { type: 'line', label: 'Percentual de inadimplência', data: percentual, borderColor: 'rgba(234,179,8,0.9)', backgroundColor: 'rgba(234,179,8,0.25)', yAxisID: 'y1', tension: 0.35, pointRadius: 3 }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: { duration: 0 },
+              interaction: { mode: 'index', intersect: false },
+              layout: { padding: { left: 2, right: 6, top: 2, bottom: 2 } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: 'rgba(0,0,0,0.65)' } },
+                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: 'rgba(0,0,0,0.65)' } },
+                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: 'rgba(0,0,0,0.65)', callback: (v) => v + '%' }, title: { display: true, text: 'Percentual' } }
+              },
+              plugins: {
+                title: { display: true, text: 'Inadimplentes X N° de Títulos X Percentual de inadimplência', color: 'rgba(0,0,0,0.8)', align: 'center', font: { weight: '600', size: 15 } },
+                legend: { display: true, position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 12 } },
+                tooltip: { padding: 10, displayColors: true, callbacks: { label: (ctx) => ctx.dataset.label + ': ' + ctx.formattedValue + (ctx.dataset.yAxisID === 'y1' ? '%' : '') } }
+              },
+              elements: { line: { borderWidth: 2 }, point: { radius: 3 } }
+            }
+          });
+        }
+
+        async function generateMixTitulosPDFReport(fromMonth, toMonth) {
+          let doc = null;
+          const fname = `relatorio-mix-titulos-${fromMonth}-${toMonth}.pdf`;
+          try {
+            const { jsPDF } = window.jspdf || {};
+            if (!jsPDF) { try { alert('Biblioteca jsPDF não encontrada. Atualize a página e tente novamente.'); } catch(_) {} return; }
+            doc = new jsPDF();
+            const pageWidth = doc.internal.pageSize.width;
+            try { console.log('Relatório Mix Títulos: início', { fromMonth, toMonth }); } catch(_) {}
+            doc.setFontSize(18);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Relatório - Inadimplentes x N° de Títulos x Percentual', pageWidth / 2, 22, { align: 'center' });
+            const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+            const fromName = monthNames[parseInt(fromMonth,10)-1] || fromMonth;
+            const toName = monthNames[parseInt(toMonth,10)-1] || toMonth;
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Período: ${fromName} até ${toName}`, pageWidth / 2, 32, { align: 'center' });
+            try {
+              let y = 46;
+              try { console.log('Relatório Mix Títulos: coletando dados'); } catch(_) {}
+              const base = await fetchInadimplenciaData();
+              const filtered = filterDataByPeriod(base, fromMonth, toMonth);
+              const titAgg = await fetchTitulosAbertoCountsAgg();
+              const tit = titAgg || await fetchTitulosAbertoCounts();
+              const inadVals = await fetchInadValorTotalAgg();
+              const fm = parseInt(fromMonth,10);
+              const tm = parseInt(toMonth,10);
+              const baseKeys = (filtered.labels || []).map(__monthKeyFromLabel).filter(Boolean);
+              const tKeysAll = Array.from((tit.countsMap || new Map()).keys());
+              const ivKeysAll = Array.from((inadVals.valuesMap || new Map()).keys());
+              const tKeys = tKeysAll.filter(k => { const m = parseInt((k.split('-')[1]||'0'),10); return m>=fm && m<=tm; });
+              const ivKeys = ivKeysAll.filter(k => { const m = parseInt((k.split('-')[1]||'0'),10); return m>=fm && m<=tm; });
+              const set = new Set();
+              baseKeys.forEach(k=>set.add(k));
+              tKeys.forEach(k=>set.add(k));
+              ivKeys.forEach(k=>set.add(k));
+              const union = Array.from(set).sort();
+              const labels = union.map(__formatMonthLabel);
+              const tmap = tit.countsMap || new Map();
+              const tvmap = tit.valuesMap || new Map();
+              const bmap = new Map((filtered.labels || []).map((l,i)=>[__monthKeyFromLabel(l),(filtered.inadimplentes||[])[i]||0]));
+              const ivmap = inadVals.valuesMap || new Map();
+              const titulosSeries = union.map(k => tmap.get(k) || 0);
+              const inadSeries = union.map(k => bmap.get(k) || 0);
+              const titValores = union.map(k => tvmap.get(k) || 0);
+              const inadValores = union.map(k => ivmap.get(k) || 0);
+              const totalTitulos = titulosSeries.reduce((s,v)=>s+v,0);
+              const totalInad = inadSeries.reduce((s,v)=>s+v,0);
+              const totalValTit = titValores.reduce((s,v)=>s+v,0);
+              const totalValInad = inadValores.reduce((s,v)=>s+v,0);
+              let maxTit = 0, maxTitIdx = -1; for (let i=0;i<titulosSeries.length;i++){ if((titulosSeries[i]||0) > maxTit){ maxTit = titulosSeries[i]; maxTitIdx = i; } }
+              let maxInad = 0, maxInadIdx = -1; for (let i=0;i<inadSeries.length;i++){ if((inadSeries[i]||0) > maxInad){ maxInad = inadSeries[i]; maxInadIdx = i; } }
+              doc.setFontSize(13);
+              doc.setFont('helvetica','bold');
+              doc.text('Resumo', 15, y); y += 6;
+              doc.setFont('helvetica','normal');
+              doc.text(`N° de títulos no período: ${intFormat(totalTitulos)}`, 15, y); y += 5;
+              if (maxTitIdx >= 0) { doc.text(`Mês com mais títulos: ${labels[maxTitIdx]} (${intFormat(maxTit)})`, 15, y); y += 5; }
+              doc.text(`Inadimplentes no período: ${intFormat(totalInad)}`, 15, y); y += 5;
+              if (maxInadIdx >= 0) { doc.text(`Mês com mais inadimplentes: ${labels[maxInadIdx]} (${intFormat(maxInad)})`, 15, y); y += 8; }
+              doc.setFont('helvetica','bold'); doc.text('Valores por mês', 15, y); y += 6; doc.setFont('helvetica','normal');
+              for (let i=0;i<labels.length;i++) { doc.text(`${labels[i]} • Títulos: ${moedaBRL(titValores[i]||0)} • Inadimplentes: ${moedaBRL(inadValores[i]||0)}`, 15, y); y += 5; if (y > 270) { doc.addPage(); y = 20; } }
+              doc.setFont('helvetica','bold'); doc.text(`Totais do período`, 15, y); y += 6; doc.setFont('helvetica','normal');
+              doc.text(`Valor total de títulos: ${moedaBRL(totalValTit)}`, 15, y); y += 5;
+              doc.text(`Valor total dos inadimplentes: ${moedaBRL(totalValInad)}`, 15, y); y += 5;
+              try { console.log('Relatório Mix Títulos: métricas calculadas', { totalTitulos, totalInad, totalValTit, totalValInad }); } catch(_) {}
+            } catch (err) {
+              try { console.error('Relatório Mix Títulos: erro ao montar dados', err); alert('Falha ao carregar dados do relatório. O arquivo será gerado com cabeçalho.'); } catch(_) {}
+            }
+          } catch (err) {
+            try { console.error('Relatório Mix Títulos: erro geral', err); alert('Erro ao gerar relatório. Tente novamente.'); } catch(_) {}
+          } finally {
+            try {
+              if (doc) { doc.save(fname); try { console.log('Relatório Mix Títulos: arquivo salvo', fname); } catch(_) {} }
+            } catch (_) {}
+          }
+        }
+
+        function ensureMixTitulosChartFilter(sectionEl) {
+          const existing = document.getElementById(MIX_TITULOS_CHART_ID + '-filter');
+          if (existing) return existing;
+          const filterContainer = document.createElement('div');
+          filterContainer.id = MIX_TITULOS_CHART_ID + '-filter';
+          filterContainer.style.cssText = 'background:#f8fafc;padding:12px 20px;margin-bottom:12px;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:14px;';
+          const filterLabel = document.createElement('span'); filterLabel.textContent = 'Filtrar Período:'; filterLabel.style.cssText = 'font-weight:600;color:#374151;';
+          const fromLabel = document.createElement('span'); fromLabel.textContent = 'De:'; fromLabel.style.cssText = 'font-weight:500;color:#374151;margin-left:8px;';
+          const fromSelect = document.createElement('select'); fromSelect.id = MIX_TITULOS_CHART_ID + '-from-month'; fromSelect.style.cssText = 'padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;cursor:pointer;min-width:120px;margin-left:4px;';
+          const toLabel = document.createElement('span'); toLabel.textContent = 'Até:'; toLabel.style.cssText = 'font-weight:500;color:#374151;margin-left:12px;';
+          const toSelect = document.createElement('select'); toSelect.id = MIX_TITULOS_CHART_ID + '-to-month'; toSelect.style.cssText = 'padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:14px;color:#374151;cursor:pointer;min-width:120px;margin-left:4px;';
+          const months = [
+            { value: '01', text: 'Janeiro' },{ value: '02', text: 'Fevereiro' },{ value: '03', text: 'Março' },{ value: '04', text: 'Abril' },{ value: '05', text: 'Maio' },{ value: '06', text: 'Junho' },{ value: '07', text: 'Julho' },{ value: '08', text: 'Agosto' },{ value: '09', text: 'Setembro' },{ value: '10', text: 'Outubro' },{ value: '11', text: 'Novembro' },{ value: '12', text: 'Dezembro' }
+          ];
+          months.forEach(m => { const o = document.createElement('option'); o.value = m.value; o.textContent = m.text; fromSelect.appendChild(o); });
+          months.forEach(m => { const o = document.createElement('option'); o.value = m.value; o.textContent = m.text; toSelect.appendChild(o); });
+          fromSelect.value = '01'; toSelect.value = '12';
+          const filterButton = document.createElement('button'); filterButton.textContent = 'Filtrar'; filterButton.style.cssText = 'background:#3b82f6;color:white;border:none;padding:8px 16px;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;margin-left:12px;';
+          filterButton.addEventListener('mouseenter', function(){ this.style.background = '#2563eb'; });
+          filterButton.addEventListener('mouseleave', function(){ this.style.background = '#3b82f6'; });
+          filterButton.addEventListener('click', async function(){ await renderMixTitulosChartWithFilter(fromSelect.value, toSelect.value); });
+          const reportButton = document.createElement('button');
+          reportButton.textContent = 'Gerar Relatório';
+          reportButton.style.cssText = 'background:#10b981;color:white;border:none;padding:8px 16px;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:background-color 0.2s;margin-left:8px;';
+          reportButton.addEventListener('mouseenter', function(){ this.style.background = '#059669'; });
+          reportButton.addEventListener('mouseleave', function(){ this.style.background = '#10b981'; });
+          reportButton.addEventListener('click', async function(){ await generateMixTitulosPDFReport(fromSelect.value, toSelect.value); });
+          filterContainer.appendChild(filterLabel);
+          filterContainer.appendChild(fromLabel);
+          filterContainer.appendChild(fromSelect);
+          filterContainer.appendChild(toLabel);
+          filterContainer.appendChild(toSelect);
+          filterContainer.appendChild(filterButton);
+          filterContainer.appendChild(reportButton);
+          const container = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const mixNode = document.getElementById(MIX_TITULOS_CHART_ID);
+          const footerAnchor = findFooterAnchor();
+          if (mixNode && mixNode.parentNode) {
+            mixNode.parentNode.insertBefore(filterContainer, mixNode);
+          } else if (footerAnchor && footerAnchor.parentNode === container) {
+            container.insertBefore(filterContainer, footerAnchor);
+          } else if (footerAnchor && footerAnchor.parentNode) {
+            footerAnchor.parentNode.insertBefore(filterContainer, footerAnchor);
+          } else {
+            container.insertBefore(filterContainer, sectionEl && sectionEl.nextSibling ? sectionEl.nextSibling : null);
+          }
+          return filterContainer;
         }
 
         // Remove cards duplicados do "Histórico Diário" mantendo apenas o melhor por data
@@ -2935,6 +4125,489 @@
           }
         }
 
+        // === Filtros Rápidos: Últimos X dias aplicados ao Histórico Diário ===
+        // Normaliza texto para comparação (remove acentos e espaços extras)
+        function __norm(txt) {
+          return (txt || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+
+        function __parseDateBR(str) {
+          const m = (str || '').match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);
+          if (!m) return null;
+          const d = parseInt(m[1], 10);
+          const mo = parseInt(m[2], 10) - 1;
+          const y = parseInt(m[3], 10);
+          const dt = new Date(y, mo, d);
+          return Number.isNaN(dt.getTime()) ? null : dt;
+        }
+
+        // Encontra o wrapper de um card a partir de um nó que contém a data
+        function __findCardWrapperFromDateNode(elWithDate) {
+          const isCardMetricsContainer = (node) => {
+            const tx = (node.textContent || '').toLowerCase();
+            return tx.includes('total cobrado') && tx.includes('clientes') && tx.includes('whatsapp') && tx.includes('email');
+          };
+          const findListContainer = (node) => {
+            let cur = node;
+            for (let i = 0; i < 12 && cur && cur.parentElement; i++) {
+              const parent = cur.parentElement;
+              const withDateChildren = Array.from(parent.children).filter(ch => /\b\d{2}\/\d{2}\/\d{4}\b/.test(ch.textContent || ''));
+              if (withDateChildren.length >= 2) return parent;
+              cur = parent;
+            }
+            return null;
+          };
+          const list = findListContainer(elWithDate);
+          if (list) {
+            const child = Array.from(list.children).find(ch => ch.contains(elWithDate));
+            if (child) return child;
+          }
+          let cur = elWithDate;
+          for (let i = 0; i < 12 && cur && cur.parentElement; i++) {
+            const parent = cur.parentElement;
+            if (isCardMetricsContainer(parent)) return parent;
+            cur = parent;
+          }
+          return elWithDate;
+        }
+
+        function __collectDailyHistoryCards(sectionEl) {
+          const container = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const dateNodes = Array.from(container.querySelectorAll('*')).filter(el => /\b\d{2}\/\d{2}\/\d{4}\b/.test(el.textContent || ''));
+          const items = [];
+          for (const dn of dateNodes) {
+            const m = (dn.textContent || '').match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
+            if (!m) continue;
+            const dateStr = m[1];
+            const dateObj = __parseDateBR(dateStr);
+            if (!dateObj) continue;
+            const card = __findCardWrapperFromDateNode(dn);
+            items.push({ dateStr, dateObj, card });
+          }
+          return items;
+        }
+
+        function clearDailyHistoryFilter(sectionEl) {
+          const container = sectionEl && sectionEl.parentNode ? sectionEl.parentNode : findMainContentRoot();
+          const hidden = Array.from(container.querySelectorAll('[data-daily-filter-hidden="true"]'));
+          hidden.forEach(el => {
+            el.style.display = '';
+            el.removeAttribute('data-daily-filter-hidden');
+          });
+        }
+
+        function applyDailyHistoryFilterDays(days, sectionEl) {
+          try {
+            if (!days || days <= 0) return;
+            const sec = sectionEl || findDailyHistorySection(findMainContentRoot());
+            if (!sec) return;
+            // Primeiro limpa qualquer filtro anterior
+            clearDailyHistoryFilter(sec);
+            // Garante deduplicação antes de filtrar
+            try { dedupeDailyHistoryCards(sec); } catch (_) {}
+            const items = __collectDailyHistoryCards(sec);
+            if (!items.length) return;
+            // Usa a data mais recente presente como referência
+            const maxTime = Math.max.apply(null, items.map(i => i.dateObj.getTime()));
+            const ref = new Date(maxTime);
+            const keepFrom = new Date(ref.getTime());
+            keepFrom.setDate(ref.getDate() - (days - 1));
+            items.forEach(({ dateObj, card }) => {
+              if (dateObj < keepFrom || dateObj > ref) {
+                card.style.display = 'none';
+                card.setAttribute('data-daily-filter-hidden', 'true');
+              } else {
+                card.style.display = '';
+                card.removeAttribute('data-daily-filter-hidden');
+              }
+            });
+            // Opcional: rola até o título do Histórico Diário
+            try { sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+            window.__dailyHistoryFilterActive = days;
+          } catch (err) {
+            console.error('Falha ao aplicar filtro de dias no Histórico Diário:', err);
+          }
+        }
+
+        // Filtro por intervalo de datas (dd/mm/aaaa)
+        function applyDailyHistoryFilterRange(fromBr, toBr, sectionEl) {
+          try {
+            const from = __parseDateBR(fromBr);
+            const to = __parseDateBR(toBr);
+            if (!from || !to) return;
+            const sec = sectionEl || findDailyHistorySection(findMainContentRoot());
+            if (!sec) return;
+            clearDailyHistoryFilter(sec);
+            try { dedupeDailyHistoryCards(sec); } catch (_) {}
+            const items = __collectDailyHistoryCards(sec);
+            if (!items.length) return;
+            items.forEach(({ dateObj, card }) => {
+              if (dateObj < from || dateObj > to) {
+                card.style.display = 'none';
+                card.setAttribute('data-daily-filter-hidden', 'true');
+              } else {
+                card.style.display = '';
+                card.removeAttribute('data-daily-filter-hidden');
+              }
+            });
+            try { sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+            window.__dailyHistoryFilterActive = { from: fromBr, to: toBr };
+          } catch (err) {
+            console.error('Falha ao aplicar filtro por intervalo no Histórico Diário:', err);
+          }
+        }
+
+        function __findApplyButton(scope) {
+          const root = scope || document;
+          const direct = root.querySelector('#reports-cards-apply');
+          if (direct) return direct;
+          const btns = Array.from(root.querySelectorAll('button, [role="button"], a'));
+          return btns.find(b => /\baplicar\b/i.test(b.textContent || '')) || null;
+        }
+
+        function __enableApplyButton() {
+          const btn = __findApplyButton(findMainContentRoot());
+          if (!btn) return;
+          try {
+            btn.removeAttribute('disabled');
+            btn.setAttribute('aria-disabled', 'false');
+            btn.setAttribute('data-apply-ready', 'true');
+          } catch (_) {}
+        }
+
+        function ensureApplyButtonBinding() {
+          if (!isReportsRoute()) return;
+          const btn = __findApplyButton(findMainContentRoot());
+          if (!btn) return;
+          if (btn.getAttribute('data-apply-bound') === 'true') return;
+          btn.setAttribute('data-apply-bound', 'true');
+          btn.addEventListener('click', (ev) => {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+            const sec = findDailyHistorySection(findMainContentRoot());
+            if (window.__dailyQuickPendingDays) {
+              applyDailyHistoryFilterDays(window.__dailyQuickPendingDays, sec);
+              window.__dailyQuickPendingDays = null;
+              return;
+            }
+            // Tenta ler entradas de data personalizadas se existirem
+            const inputs = Array.from(findMainContentRoot().querySelectorAll('input'));
+            const fromInput = inputs.find(i => /data\s*in[ií]cio/i.test(i.placeholder || i.getAttribute('aria-label') || ''));
+            const toInput = inputs.find(i => /data\s*fim/i.test(i.placeholder || i.getAttribute('aria-label') || ''));
+            const fromVal = fromInput && (fromInput.value || fromInput.getAttribute('value'));
+            const toVal = toInput && (toInput.value || toInput.getAttribute('value'));
+            if (fromVal && toVal) {
+              applyDailyHistoryFilterRange(fromVal, toVal, sec);
+            }
+          }, true);
+        }
+
+        function __findHistoryFiltersHeading(scope) {
+          const root = scope || findMainContentRoot() || document;
+          const nodes = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,section,div,p'));
+          return nodes.find(el => /\bfiltros\s*do\s*hist[oó]rico\b/i.test(__norm(el.textContent || ''))) || null;
+        }
+
+        function __nearestCommonAncestor(elements) {
+          if (!elements || !elements.length) return null;
+          let a = elements[0];
+          while (a) {
+            let ok = true;
+            for (let i = 1; i < elements.length; i++) {
+              if (!a.contains(elements[i])) { ok = false; break; }
+            }
+            if (ok) return a;
+            a = a.parentElement;
+          }
+          return null;
+        }
+
+        function __removeIfEmptyContainer(container) {
+          if (!container) return;
+          const children = Array.from(container.children);
+          const hasVisible = children.some(ch => {
+            const txt = __norm(ch.textContent || '');
+            const tag = (ch.tagName || '').toLowerCase();
+            const display = (ch.style && ch.style.display) || '';
+            if (display === 'none') return false;
+            if (tag === 'hr') return false;
+            return (txt && txt.trim().length) || (ch.children && ch.children.length);
+          });
+          if (!hasVisible) { try { container.remove(); } catch (_) {} }
+        }
+
+        function __removeHistoryFilters() {
+          if (!isReportsRoute()) return;
+          const root = findMainContentRoot();
+          const heading = __findHistoryFiltersHeading(root);
+          const ids = [TOP_CHART_ID, PERCENT_CHART_ID, CHART_ID].filter(Boolean);
+          const containsCritical = (el) => {
+            if (!el) return false;
+            const idHit = ids.some(id => el.querySelector('#' + id));
+            const hasHD = Array.from(el.querySelectorAll('h1,h2,h3,h4,h5,section,div')).some(e => /\bhist[oó]rico\s*di[aá]rio\b/i.test(__norm(e.textContent || '')));
+            return idHit || hasHD;
+          };
+
+          // 1) Remove título "Filtros do Histórico"
+          if (heading) { try { heading.remove(); } catch (_) {} }
+
+          // 2) Remove bloco de "Períodos Rápidos"
+          const quickBtns = Array.from(root.querySelectorAll('button,[role="button"],a')).filter(b => /(ultimos|últimos)\s*(7|15|30|90)\s*dias/i.test(__norm(b.textContent || '')));
+          if (quickBtns.length) {
+            let quickBlock = quickBtns.length >= 2 ? __nearestCommonAncestor(quickBtns) : (quickBtns[0] && quickBtns[0].parentElement);
+            if (quickBlock && containsCritical(quickBlock)) {
+              // procura um container menor com o rótulo "Períodos Rápidos"
+              let cur = quickBtns[0];
+              for (let i = 0; i < 6 && cur; i++) {
+                const parent = cur.parentElement;
+                const hasTitleRapid = parent && /\bper[ií]odos\s*rápidos\b/i.test(__norm(parent.textContent || ''));
+                if (parent && hasTitleRapid && !containsCritical(parent)) { quickBlock = parent; break; }
+                cur = parent;
+              }
+            }
+            if (quickBlock) { try { quickBlock.remove(); } catch (_) {} }
+          }
+
+          // 3) Remove bloco de período personalizado (dois inputs + botão Aplicar), exceto o nosso filtro de cards
+          const inCardsFilter = (node) => !!(node && node.closest && node.closest('#reports-cards-filter'));
+          const inputs = Array.from(root.querySelectorAll('input')).filter(i => !inCardsFilter(i));
+          const fromInput = inputs.find(i => /data\s*in[ií]cio/i.test(i.placeholder || i.getAttribute('aria-label') || ''));
+          const toInput = inputs.find(i => /data\s*fim/i.test(i.placeholder || i.getAttribute('aria-label') || ''));
+          const applyBtnCandidate = __findApplyButton(root);
+          const applyBtn = inCardsFilter(applyBtnCandidate) ? null : applyBtnCandidate;
+          const customNodes = [fromInput, toInput, applyBtn].filter(Boolean);
+          if (customNodes.length) {
+            let customBlock = __nearestCommonAncestor(customNodes);
+            if (!customBlock && fromInput) customBlock = fromInput.parentElement;
+            if (customBlock && !containsCritical(customBlock) && !inCardsFilter(customBlock)) {
+              try { customBlock.remove(); } catch (_) {}
+            } else {
+              [fromInput, toInput, applyBtn].forEach(n => { try { (n && !inCardsFilter(n)) && n.remove(); } catch (_) {} });
+            }
+          }
+
+          // 4) Remove separadores vazios na área dos filtros
+          if (heading) {
+            try { __removeIfEmptyContainer(heading.parentElement); } catch (_) {}
+          }
+        }
+
+        function __locateHistoryFiltersWrapper(scope) {
+          const root = scope || findMainContentRoot() || document;
+          const all = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,section,div,p'));
+          const byTitle = all.filter(el => /(filtros\s*do\s*hist[oó]rico)/i.test(__norm(el.textContent || '')));
+          for (const heading of byTitle) {
+            let wrapper = heading.closest('section');
+            let cur = wrapper || heading;
+            for (let i = 0; i < 6 && cur; i++) {
+              const btns = Array.from(cur.querySelectorAll('button,[role="button"],a'));
+              const hasQuick = btns.some(b => /(ultimos|últimos)\s*\d+\s*dias/i.test(__norm(b.textContent || '')));
+              const inputs = Array.from(cur.querySelectorAll('input'));
+              const hasInputs = inputs.some(i => /data\s*in[ií]cio|data\s*fim/i.test(i.placeholder || i.getAttribute('aria-label') || ''));
+              if (hasQuick || hasInputs) { wrapper = cur; break; }
+              cur = cur.parentElement;
+            }
+            if (wrapper) return wrapper;
+          }
+          const quickBtn = Array.from(root.querySelectorAll('button,[role="button"],a')).find(b => /(ultimos|últimos)\s*7\s*dias/i.test(__norm(b.textContent || '')));
+          if (quickBtn) return quickBtn.closest('section') || quickBtn.parentElement;
+          return null;
+        }
+
+        function ensureHistoryFiltersRemoved() {
+          if (!isReportsRoute()) return;
+          const root = findMainContentRoot();
+          try { __removeHistoryFilters(); } catch (_) {}
+          if (!window.__historyFiltersRemovalObserver) {
+            const obs = new MutationObserver(() => {
+              try { __removeHistoryFilters(); } catch (_) {}
+            });
+            obs.observe(root || document.body, { childList: true, subtree: true });
+            window.__historyFiltersRemovalObserver = obs;
+          }
+        }
+
+        // Remoção precisa: apenas os labels e botões de datas restantes
+        function ensureExactFilterVestigeRemoved() {
+          if (!isReportsRoute()) return;
+          const root = findMainContentRoot() || document;
+          const labels = Array.from(root.querySelectorAll('label'));
+          labels.forEach(l => {
+            const t = __norm(l.textContent || '');
+            if (/\bper[ií]odos?\s*rápidos\b/i.test(t) || /\bper[ií]odo\s*personalizado\b/i.test(t)) {
+              try { l.remove(); } catch (_) {}
+            }
+          });
+          const buttons = Array.from(root.querySelectorAll('button'));
+          buttons.forEach(b => {
+            const t = __norm(b.textContent || '');
+            if (/\bdata\s*in[ií]cio\b/i.test(t) || /\bdata\s*fim\b/i.test(t)) {
+              try { b.remove(); } catch (_) {}
+            }
+          });
+        }
+
+        // Remoção específica do bloco: div(label "Períodos Rápidos") e div seguinte
+        function ensureQuickPeriodsHeaderBlockRemoved() {
+          const roots = [findMainContentRoot(), document].filter(Boolean);
+          for (const root of roots) {
+            const labels = Array.from(root.querySelectorAll('label'));
+            labels.forEach(label => {
+              const txt = __norm(label.textContent || '');
+              if (!/per[ií]odos?\s*rápidos/i.test(txt)) return;
+              const parentDiv = label.closest('div');
+              const nextDiv = parentDiv && parentDiv.nextElementSibling;
+              // Remove label
+              try { label.remove(); } catch (_) {}
+              // Remove div que envolve o label, se for o container direto (evita retirar containers maiores)
+              if (parentDiv && (parentDiv.hasAttribute('data-quickfilter-bound') || (parentDiv.children.length === 0 || (parentDiv.children.length === 0)))) {
+                try { parentDiv.remove(); } catch (_) {}
+              } else if (parentDiv && parentDiv.children.length === 0) {
+                try { parentDiv.remove(); } catch (_) {}
+              }
+              // Remove div separador seguinte com classe border-t
+              if (nextDiv && nextDiv.tagName && nextDiv.tagName.toLowerCase() === 'div') {
+                const cls = (nextDiv.className || '').toString();
+                if (/\bborder-t\b/.test(cls)) {
+                  try { nextDiv.remove(); } catch (_) {}
+                }
+              }
+            });
+          }
+        }
+
+        function startQuickPeriodsCleanupObserver() {
+          try {
+            if (window.__quickPeriodsCleanupObs) return;
+            const obs = new MutationObserver(() => {
+              try { ensureQuickPeriodsHeaderBlockRemoved(); } catch (_) {}
+              try { ensureStrictQuickPeriodsTripletRemoved(); } catch (_) {}
+              try { ensureAggressiveQuickPeriodsRemoval(); } catch (_) {}
+              try { ensureRemoveEmptyQuickFilterContainer(); } catch (_) {}
+            });
+            obs.observe(document.body, { childList: true, subtree: true });
+            window.__quickPeriodsCleanupObs = obs;
+            // Primeira varredura imediata
+            ensureQuickPeriodsHeaderBlockRemoved();
+            ensureStrictQuickPeriodsTripletRemoved();
+            ensureAggressiveQuickPeriodsRemoval();
+            ensureRemoveEmptyQuickFilterContainer();
+          } catch (_) {}
+        }
+
+        // Remoção estrita: remove apenas o trio div(div(label "Períodos Rápidos")) + div.border-t
+        function ensureStrictQuickPeriodsTripletRemoved() {
+          const root = findMainContentRoot() || document;
+          // Containers prováveis da seção de filtros
+          const candidates = Array.from(root.querySelectorAll('div.p-6.pt-0.space-y-4, [data-quickfilter-bound="true"]'));
+          candidates.forEach(container => {
+            const label = Array.from(container.querySelectorAll('label')).find(l => /\bper[ií]odos?\s*rápidos\b/i.test(__norm(l.textContent || '')));
+            if (!label) return;
+            const firstDiv = label.closest('div');
+            const secondDiv = firstDiv && firstDiv.nextElementSibling;
+            // Remove somente os elementos exatos
+            try { label.remove(); } catch (_) {}
+            if (firstDiv) { try { firstDiv.remove(); } catch (_) {} }
+            if (secondDiv && /\bborder-t\b/.test((secondDiv.className || '').toString())) {
+              try { secondDiv.remove(); } catch (_) {}
+            }
+          });
+        }
+
+        // Remoção agressiva por texto (ignorando acentos), apenas o trio div/label/div
+        function ensureAggressiveQuickPeriodsRemoval() {
+          const root = document;
+          const noAccents = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+          const labels = Array.from(root.querySelectorAll('label'));
+          labels.forEach(l => {
+            const t = noAccents(l.textContent || '');
+            if (t === 'periodos rapidos') {
+              const firstDiv = l.closest('div');
+              const secondDiv = firstDiv && firstDiv.nextElementSibling;
+              try { l.remove(); } catch (_) {}
+              if (firstDiv) { try { firstDiv.remove(); } catch (_) {} }
+              if (secondDiv && secondDiv.tagName && secondDiv.tagName.toLowerCase() === 'div') {
+                const cls = (secondDiv.className || '').toString();
+                if (/\bborder-t\b/.test(cls)) { try { secondDiv.remove(); } catch (_) {} }
+              }
+            }
+          });
+        }
+
+        // Remove apenas o div vazio remanescente do bloco de filtros
+        function ensureRemoveEmptyQuickFilterContainer() {
+          const root = document;
+          const candidates = Array.from(root.querySelectorAll('div[data-quickfilter-bound="true"]'));
+          candidates.forEach(div => {
+            const cls = (div.className || '').toString();
+            const looksLikeFilterWrapper = /\bp-6\b/.test(cls) && /\bpt-0\b/.test(cls) && /\bspace-y-4\b/.test(cls);
+            const isEmpty = (!div.textContent || div.textContent.trim().length === 0) && div.children.length === 0;
+            if (looksLikeFilterWrapper && isEmpty) {
+              try { div.remove(); } catch (_) {}
+            }
+          });
+        }
+
+        function ensureHistoryQuickFiltersBinding() {
+          if (!isReportsRoute()) return;
+          const root = findMainContentRoot();
+
+          // 1) Delegação: captura cliques e configura período pendente; habilita "Aplicar"
+          if (!window.__historyQuickFiltersDelegated) {
+            const delegatedHandler = (ev) => {
+              let el = ev.target;
+              for (let i = 0; i < 5 && el; i++) {
+                const t = __norm(el.textContent || '');
+                const setPending = (n) => {
+                  try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+                  window.__dailyQuickPendingDays = n;
+                  __enableApplyButton();
+                  ensureApplyButtonBinding();
+                };
+                if (/(ultimos|últimos)\s*7\s*dias/.test(t)) return setPending(7);
+                if (/(ultimos|últimos)\s*15\s*dias/.test(t)) return setPending(15);
+                if (/(ultimos|últimos)\s*30\s*dias/.test(t)) return setPending(30);
+                if (/(ultimos|últimos)\s*90\s*dias/.test(t)) return setPending(90);
+                el = el.parentElement;
+              }
+            };
+            root.addEventListener('click', delegatedHandler, true);
+            window.__historyQuickFiltersDelegated = true;
+          }
+
+          // 2) Binding direto (fallback) para elementos com texto correspondente
+          const allClickables = Array.from(root.querySelectorAll('button, a, [role="button"], .btn, span, div'));
+          const matchers = [
+            { days: 7, rx: /(ultimos|últimos)\s*7\s*dias/ },
+            { days: 15, rx: /(ultimos|últimos)\s*15\s*dias/ },
+            { days: 30, rx: /(ultimos|últimos)\s*30\s*dias/ },
+            { days: 90, rx: /(ultimos|últimos)\s*90\s*dias/ }
+          ];
+          let boundAny = false;
+          for (const el of allClickables) {
+            const t = __norm(el.textContent || '');
+            for (const m of matchers) {
+              if (m.rx.test(t)) {
+                if (el.getAttribute('data-quickfilter-bound') === 'true') continue;
+                el.setAttribute('data-quickfilter-bound', 'true');
+                el.addEventListener('click', (ev) => {
+                  try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+                  window.__dailyQuickPendingDays = m.days;
+                  __enableApplyButton();
+                  ensureApplyButtonBinding();
+                });
+                boundAny = true;
+                break;
+              }
+            }
+          }
+          if (boundAny) window.__historyQuickFiltersBound = true;
+        }
+
         async function renderChart(data) {
           const ctx = document.getElementById(CHART_ID + '-canvas');
           if (!ctx || !window.Chart) return;
@@ -2966,6 +4639,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: { duration: 0 },
               interaction: { mode: 'index', intersect: false },
               layout: { padding: { left: 2, right: 6, top: 2, bottom: 0 } },
               scales: {
@@ -3010,6 +4684,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: { duration: 0 },
               interaction: { mode: 'index', intersect: false },
               layout: { padding: { left: 2, right: 6, top: 2, bottom: 0 } },
               scales: {
@@ -3129,6 +4804,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: { duration: 0 },
               interaction: { mode: 'index', intersect: false },
               layout: { padding: { left: 2, right: 6, top: 2, bottom: 2 } },
               scales: {
@@ -3163,11 +4839,39 @@
               } catch (_) {}
             }, i * 400);
           }
+          ensureReportsCardsFilter(sectionEl);
           const parsed = parseTableData(sectionEl);
           // Primeiro, garante o gráfico superior (linhas)
           const topWrapper = ensureTopChartContainer(sectionEl);
           await renderTopChart(parsed);
           window.__reportsTopChartInited = true;
+          ensureHistoryFiltersRemoved();
+          ensureQuickPeriodsHeaderBlockRemoved();
+          ensureStrictQuickPeriodsTripletRemoved();
+          ensureExactFilterVestigeRemoved();
+          startQuickPeriodsCleanupObserver();
+          // Vincula o botão Aplicar e habilita quando houver seleção
+          ensureApplyButtonBinding();
+          // Vincula filtros rápidos do Histórico Diário (Últimos X dias)
+          ensureHistoryQuickFiltersBinding();
+          ensureMetricsCardsContainer(sectionEl);
+          removeDuplicateMetricsCards();
+          removeLegacyDailyBlock();
+          removeLegacyCardsExact();
+          removeLegacyCardsByTitles();
+          removeFollowingLegacyBlocks();
+          removeLegacyCardsHard();
+          removeAllBetweenCardsAndDaily();
+          removeGlobalLegacyCards();
+          // Não reconstruir aqui; tryInit já garante wrappers e renderizações
+          try {
+            const now = new Date();
+            const y = now.getFullYear();
+            const jan1 = `${y}-01-01`;
+            const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            await loadAndRenderCards(jan1, today);
+            await loadAndRenderDailySummary(jan1, today);
+          } catch (_) {}
           // Em seguida, garante o gráfico de percentual logo abaixo do superior
           const percWrapper = ensurePercentChartContainer(sectionEl);
           await renderPercentChart(parsed);
@@ -3178,12 +4882,17 @@
           ensureBottomChartFilter(sectionEl);
           await renderChart(parsed);
           window.__reportsChartInited = true;
+          const mixWrapper = ensureMixTitulosChartContainer(sectionEl);
+          ensureMixTitulosChartFilter(sectionEl);
+          await renderMixTitulosChart();
+          window.__reportsMixTitulosChartInited = true;
           // Fade-in após renderização (com micro atraso)
           requestAnimationFrame(() => {
             setTimeout(() => {
               if (topWrapper) topWrapper.style.opacity = '1';
               if (percWrapper) percWrapper.style.opacity = '1';
               if (bottomWrapper) bottomWrapper.style.opacity = '1';
+              if (mixWrapper) mixWrapper.style.opacity = '1';
             }, SHOW_DELAY_MS);
           });
           // Mantemos o observer ativo; o scheduleInit já impede re-render desnecessário
@@ -3197,6 +4906,7 @@
         function initObserver() {
           const container = findMainContentRoot();
           if (!container) return;
+          try { probeTablesOnce(); } catch (_) {}
           const mo = new MutationObserver(() => {
             // Só tenta inicializar se ainda não temos os gráficos no DOM
             if (!isReportsRoute()) return;
@@ -3205,11 +4915,33 @@
               const sectionEl = findDailyHistorySection(container);
               dedupeDailyHistoryCards(sectionEl);
             } catch (_) {}
+            // Garante binding dos filtros rápidos quando elementos são (re)inseridos
+            try { ensureHistoryQuickFiltersBinding(); } catch (_) {}
+            try { ensureApplyButtonBinding(); } catch (_) {}
+            try { ensureHistoryFiltersRemoved(); } catch (_) {}
+            try { ensureQuickPeriodsHeaderBlockRemoved(); } catch (_) {}
+            try { ensureExactFilterVestigeRemoved(); } catch (_) {}
+            try { ensureReportsCardsFilter(findDailyHistorySection(container)); } catch (_) {}
+            try { removeDuplicateMetricsCards(); } catch (_) {}
+            try { removeLegacyDailyBlock(); } catch (_) {}
+            try { removeLegacyCardsExact(); } catch (_) {}
+            try { removeLegacyCardsByTitles(); } catch (_) {}
+            try { removeFollowingLegacyBlocks(); } catch (_) {}
+            try { removeLegacyCardsHard(); } catch (_) {}
+            try { removeAllBetweenCardsAndDaily(); } catch (_) {}
+            try { removeGlobalLegacyCards(); } catch (_) {}
+            const needsRebuild = !document.getElementById(TOP_CHART_ID) || !document.getElementById(PERCENT_CHART_ID) || !document.getElementById(CHART_ID) || !document.getElementById(MIX_TITULOS_CHART_ID);
+            if (needsRebuild) { try { rebuildReportsSection(); } catch (_) {} }
             const topExists = !!document.getElementById(TOP_CHART_ID);
             const percentExists = !!document.getElementById(PERCENT_CHART_ID);
             const bottomExists = !!document.getElementById(CHART_ID);
             if (!(topExists && percentExists && bottomExists)) scheduleInit();
           });
+          for (let i = 1; i <= 6; i++) {
+            setTimeout(() => { try { removeLegacyCardsHard(); } catch (_) {} }, i * 500);
+            setTimeout(() => { try { removeAllBetweenCardsAndDaily(); } catch (_) {} }, i * 500 + 250);
+            setTimeout(() => { try { removeGlobalLegacyCards(); } catch (_) {} }, i * 500 + 400);
+          }
           if (window.__reportsObserver) {
             try { window.__reportsObserver.disconnect(); } catch (e) {}
           }
@@ -3244,6 +4976,7 @@
           window.__reportsTopChartInited = false;
           window.__reportsChartInited = false;
           window.__reportsPercentChartInited = false;
+          window.__reportsMixTitulosChartInited = false;
           initObserver();
           initDailyHistoryObserver(findDailyHistorySection(findMainContentRoot()));
           scheduleInit();
@@ -3252,6 +4985,7 @@
           window.__reportsTopChartInited = false;
           window.__reportsChartInited = false;
           window.__reportsPercentChartInited = false;
+          window.__reportsMixTitulosChartInited = false;
           initObserver();
           initDailyHistoryObserver(findDailyHistorySection(findMainContentRoot()));
           scheduleInit();
